@@ -88,10 +88,6 @@ def create_config(task_id, model, dataset, dataset_type, file_format, output_dir
     config["mlflow_experiment_name"] = dataset
     os.makedirs(output_dir, exist_ok=True)
     config["output_dir"] = str(output_dir)
-    config["trl"]["vllm_mode"] = "colocate"
-    vllm_tensor_parallel_size = os.getenv("VLLM_TENSOR_PARALLEL_SIZE" , 1)
-    if vllm_tensor_parallel_size:
-        config["vllm"]["tensor_parallel_size"] = int(vllm_tensor_parallel_size)
 
     if log_wandb:
         config["wandb_runid"] = f"{task_id}_{expected_repo_name}"
@@ -121,6 +117,10 @@ def create_config(task_id, model, dataset, dataset_type, file_format, output_dir
             config["trl"]["rollout_func"] = "alfworld.alfworld_rollout_first_prompt_and_completion"
             config["trl"]["reward_funcs"] = ["alfworld.alfworld_rollout_reward_func"]
             config["trl"]["reward_weights"] = [1.0]
+        elif dataset_type.environment_name == "goofspiel":
+            config["trl"]["rollout_func"] = "affine_game.rollout_first_prompt_and_completion"
+            config["trl"]["reward_funcs"] = ["affine_game.rollout_reward_func"]
+            config["trl"]["reward_weights"] = [1.0]
 
     if file_format != FileFormat.HF.value:
         for ds in config["datasets"]:
@@ -139,7 +139,7 @@ def create_config(task_id, model, dataset, dataset_type, file_format, output_dir
             config["special_tokens"] = {"bos_token": tokenizer.eos_token}
         else:
             config["special_tokens"] = {"bos_token": ""}
-    print(f"Config: {config}", flush=True)
+
     config_path = os.path.join(train_cst.AXOLOTL_DIRECTORIES["configs"], f"{task_id}.yml")
     save_config(config, config_path)
     return config_path
@@ -155,14 +155,7 @@ def run_training(config_path):
     training_env["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
     training_env["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
-    training_command = ["accelerate", "launch"]
-    num_processes = os.getenv("ACCELERATE_NUM_PROCESSES", 2)
-    if num_processes:
-        training_command += ["--num_processes", str(num_processes)]
-    num_machines = os.getenv("ACCELERATE_NUM_MACHINES", 1 )
-    if num_machines:
-        training_command += ["--num_machines", str(num_machines)]
-    training_command += ["-m", "axolotl.cli.train", config_path]
+    training_command = ["accelerate", "launch", "-m", "axolotl.cli.train", config_path]
 
     try:
         print("Starting training subprocess...\n", flush=True)

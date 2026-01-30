@@ -11,9 +11,9 @@ RUN uv pip install packaging setuptools wheel awscli pydantic \
       tenacity minio pandas tiktoken sentencepiece peft Pillow \
       PyYAML textstat langcheck detoxify \
       git+https://github.com/rayonlabs/fiber@2.4.0 \
-      git+https://github.com/huggingface/trl@40dc4bd993f699c8c36a5bc0cf31511b8866aadf
+      git+https://github.com/huggingface/trl@07b4a84e0a3c8f37a2508fe177615af019782946
 
-RUN uv pip install --no-build-isolation vllm==0.12.0
+RUN uv pip install --no-build-isolation vllm==0.10.2
 
 WORKDIR /workspace/axolotl
 RUN mkdir -p /workspace/axolotl/configs \

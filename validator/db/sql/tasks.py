@@ -1656,3 +1656,21 @@ async def copy_task_for_benchmark(
     except Exception as e:
         logger.error(f"Error copying task {original_task.task_id}: {str(e)}", exc_info=True)
         raise
+
+
+async def get_env_task_eval_seed(task_id: UUID, psql_db: PSQLDB) -> int | None:
+    """
+    Get the eval_seed for an environment task.
+    This is kept separate from normal task fetches to keep eval_seed confidential.
+    """
+    async with await psql_db.connection() as connection:
+        connection: Connection
+        query = f"""
+            SELECT {cst.EVAL_SEED}
+            FROM {cst.ENV_TASKS_TABLE}
+            WHERE {cst.TASK_ID} = $1
+        """
+        row = await connection.fetchrow(query, task_id)
+        if row:
+            return row[cst.EVAL_SEED]
+        return None

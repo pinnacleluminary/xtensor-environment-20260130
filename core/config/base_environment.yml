@@ -15,42 +15,38 @@ output_dir: miner_id_24
 rl: grpo
 vllm:
   tensor_parallel_size: 1
-  gpu_memory_utilization: 0.5
-  max_model_len: 24576
-  enable_prefix_caching: True
+  gpu_memory_utilization: 0.15
+  max_model_len: 24000
+  enable_prefix_caching: False
 trl:
-  beta: 0.02
-  loss_type: dr_grpo
+  beta: 0.001
   max_completion_length: 256
-  temperature: 0.75
+  temperature: 0.7
   use_vllm: true
   vllm_mode: colocate
-  vllm_server_host: vllm-server
-  vllm_server_port: 8000
-  vllm_group_port: 51216
-  vllm_enable_sleep_mode: true
-  num_generations: 6
+  vllm_enable_sleep_mode: false
+  num_generations: 4
   rollout_func:
 
 eval_strategy: "no"
-sequence_len: 24576
+sequence_len: 24000
 sample_packing: false
 pad_to_sequence_len: true
 trust_remote_code: true
 
 adapter: lora
 lora_model_dir:
-lora_r: 24
-lora_alpha: 48
-lora_dropout: 0.05
+lora_r: 64
+lora_alpha: 64
+lora_dropout: 0.0
 lora_target_linear: true
 lora_fan_in_fan_out:
 
-gradient_accumulation_steps: 16
-micro_batch_size: 2
+gradient_accumulation_steps: 1
+micro_batch_size: 4
 optimizer: adamw_bnb_8bit
 lr_scheduler: cosine
-learning_rate: 3e-5
+learning_rate: 5e-6
 max_grad_norm: 1.0
 
 train_on_inputs: false
@@ -59,7 +55,7 @@ bf16: auto
 fp16:
 tf32: false
 
-gradient_checkpointing: true
+gradient_checkpointing: false
 early_stopping_patience:
 resume_from_checkpoint:
 local_rank:
@@ -76,8 +72,10 @@ wandb_run: Gradients-Rollout
 wandb_runid: default
 
 eval_table_size:
-max_steps: 125
+max_steps: 100000
+warmup_steps: 25
 save_steps: 20
+save_total_limit: 1
 debug:
 deepspeed:
 weight_decay: 0.0
