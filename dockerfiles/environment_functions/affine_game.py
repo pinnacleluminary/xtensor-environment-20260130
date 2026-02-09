@@ -15,13 +15,12 @@ Your two options are 'random' and 'mcts'.
 Miners are free to choose which opponent type they train against.
 """
 
-import re
-
-
 def extract_and_validate_numeric_action(completion_text: str, valid_action_range: tuple[int, int] = None) -> int | None:
     """
     Extract numeric action ID from completion text with validation.
     Returns action ID or None if invalid.
+    
+    This is critical for chat-capable models that may output verbose responses.
     """
     # Clean completion text
     action_candidate = completion_text.strip()
@@ -35,11 +34,34 @@ def extract_and_validate_numeric_action(completion_text: str, valid_action_range
         if "Thought:" in action_candidate:
             action_candidate = action_candidate.split("Thought:")[-1].strip()
     
-    # Strategy 2: Extract first number found
-    numbers = re.findall(r'-?\d+', action_candidate)
-    if numbers:
+    # Strategy 2: Extract first number found (readable approach without regex)
+    # Look for the first sequence of digits, optionally starting with a minus sign
+    number_chars = []
+    found_minus = False
+    found_digit = False
+    
+    for char in action_candidate:
+        if char == '-' and not found_digit and not found_minus:
+            # Found a minus sign at the start of a potential number
+            number_chars.append(char)
+            found_minus = True
+        elif char.isdigit():
+            # Found a digit - add it and mark that we're building a number
+            number_chars.append(char)
+            found_digit = True
+        elif found_digit:
+            # We were building a number but hit a non-digit - stop here
+            break
+        elif found_minus and not char.isdigit():
+            # We had a minus but no digit after it - reset
+            number_chars = []
+            found_minus = False
+    
+    # If we found a number, try to convert it
+    if number_chars and found_digit:
+        number_str = ''.join(number_chars)
         try:
-            action_id = int(numbers[0])
+            action_id = int(number_str)
             
             # Validate range if provided
             if valid_action_range:
@@ -54,7 +76,7 @@ def extract_and_validate_numeric_action(completion_text: str, valid_action_range
         except ValueError:
             pass
     
-    # Strategy 3: Try direct conversion
+    # Strategy 3: Try direct conversion of the entire cleaned text
     try:
         action_id = int(action_candidate)
         if valid_action_range:
@@ -79,6 +101,11 @@ def calculate_game_shaped_reward(
 ) -> float:
     """
     Calculate shaped reward for game environments with intermediate signals.
+    
+    This provides better credit assignment for chat-capable models by:
+    - Rewarding intermediate progress
+    - Encouraging efficient play
+    - Providing signals throughout the episode, not just at the end
     """
     reward = 0.0
     
@@ -102,10 +129,13 @@ def calculate_game_shaped_reward(
     if turn_number > max_turns * 0.8:  # Last 20% of turns
         reward -= 0.01
     
-    # Game-specific shaping could be added here
-    # if game_type == "goofspiel":
-    #     # Reward for strategic play
-    #     pass
+    # Goofspiel-specific shaping: reward strategic play
+    if game_type == "goofspiel":
+        # Reward for maintaining positive cumulative score
+        if cumulative_reward > 0.5:  # Strong lead
+            reward += 0.03
+        elif cumulative_reward > 0:  # Small lead
+            reward += 0.01
     
     return reward
 
@@ -281,6 +311,7 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
 
             # --- Parse and Validate Action (OPTIMIZED) ---
             # Extract numeric action ID with validation
+            # This is critical for chat-capable models that may output verbose responses
             action_id = extract_and_validate_numeric_action(completion_text)
             
             if action_id is not None:

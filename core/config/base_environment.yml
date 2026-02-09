@@ -15,17 +15,17 @@ output_dir: miner_id_24
 rl: grpo
 vllm:
   tensor_parallel_size: 1
-  gpu_memory_utilization: 0.15
+  gpu_memory_utilization: 0.80
   max_model_len: 24000
   enable_prefix_caching: False
 trl:
-  beta: 0.001
+  beta: 0.02
   max_completion_length: 256
-  temperature: 0.7
+  temperature: 0.75
   use_vllm: true
   vllm_mode: colocate
-  vllm_enable_sleep_mode: false
-  num_generations: 4
+  vllm_enable_sleep_mode: true
+  num_generations: 6
   rollout_func:
 
 eval_strategy: "no"

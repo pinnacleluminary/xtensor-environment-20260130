@@ -357,7 +357,7 @@ def deploy_env_basilica(
     
     client = basilica.BasilicaClient()
 
-    image_to_use = env_image if env_image else cst.BASILICA_ENV_IMAGE
+    image_to_use = env_image if env_image else cst.BASILICA_AGENTGYM_IMAGE
     
     deployment = client.deploy(
         name=deployment_name,

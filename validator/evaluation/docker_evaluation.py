@@ -3,7 +3,6 @@ import io
 import json
 import logging
 import os
-import re
 import shutil
 import tarfile
 from datetime import datetime
@@ -14,10 +13,10 @@ from docker.models.containers import Container
 from docker.types import Mount
 from huggingface_hub import snapshot_download
 import aiohttp
-import requests
 import time
 import random
 import basilica
+
 from core import constants as cst
 from core.models.payload_models import DockerEvaluationResults
 from core.models.payload_models import EvaluationResultImage
@@ -262,34 +261,47 @@ async def run_evaluation_docker_text(
         }
     }
 
+    container = None
+    retry_delay = 5.0
+    
     try:
-        container: Container = await asyncio.to_thread(
-            client.containers.run,
-            cst.VALIDATOR_DOCKER_IMAGE,
-            command=command,
-            environment=environment,
-            volumes=volume_bindings,
-            runtime="nvidia",
-            device_requests=[docker.types.DeviceRequest(capabilities=[["gpu"]], device_ids=[str(gid) for gid in gpu_ids])],
-            detach=True,
-        )
-        log_task = asyncio.create_task(asyncio.to_thread(stream_container_logs, container, None, get_all_context_tags()))
-        result = await asyncio.to_thread(container.wait)
-        log_task.cancel()
+        while True:
+            try:
+                container: Container = await asyncio.to_thread(
+                    client.containers.run,
+                    cst.VALIDATOR_DOCKER_IMAGE,
+                    command=command,
+                    environment=environment,
+                    volumes=volume_bindings,
+                    runtime="nvidia",
+                    device_requests=[docker.types.DeviceRequest(capabilities=[["gpu"]], device_ids=[str(gid) for gid in gpu_ids])],
+                    detach=True,
+                )
+                log_task = asyncio.create_task(asyncio.to_thread(stream_container_logs, container, None, get_all_context_tags()))
+                result = await asyncio.to_thread(container.wait)
+                log_task.cancel()
 
-        if result["StatusCode"] != 0:
-            raise Exception(f"Container exited with status {result['StatusCode']}")
+                if result["StatusCode"] != 0:
+                    raise Exception(f"Container exited with status {result['StatusCode']}")
 
-        eval_results = await get_evaluation_results(container)
-        return process_evaluation_results(eval_results, is_image=False)
+                eval_results = await get_evaluation_results(container)
+                return process_evaluation_results(eval_results, is_image=False)
 
-    except Exception as e:
-        logger.error(f"Failed to retrieve {task_type} evaluation results: {str(e)}", exc_info=True)
-        raise Exception(f"Failed to retrieve {task_type} evaluation results: {str(e)}")
+            except Exception as e:
+                logger.error(f"Failed to retrieve {task_type} evaluation results: {str(e)}, retrying in {retry_delay}s...", exc_info=True)
+                if container is not None:
+                    try:
+                        await asyncio.to_thread(container.remove, force=True)
+                        container = None
+                    except:
+                        pass
+                await asyncio.sleep(retry_delay)
+                continue
 
     finally:
         try:
-            await asyncio.to_thread(container.remove, force=True)
+            if container is not None:
+                await asyncio.to_thread(container.remove, force=True)
             await cleanup_resources(client)
         except Exception as e:
             logger.info(f"A problem with cleaning up {e}")
@@ -352,61 +364,70 @@ async def run_evaluation_docker_grpo(
         client = docker.from_env()
         environment = base_environment.copy()
         environment["MODELS"] = repo
-        try:
-            model_path = await asyncio.to_thread(
-                snapshot_download,
-                repo_id=repo,
-                cache_dir=cache_dir,
-                ignore_patterns=["*.h5", "*.ot", "*.msgpack", "*.pkl", "*.pth"]
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to download {repo}: {str(e)}")
-            evaluation_results[repo] = f"Failed to download model: {str(e)}"
-            continue
+        retry_delay = 5.0
+        
+        # Infinite retry for model download
+        model_path = None
+        while model_path is None:
+            try:
+                model_path = await asyncio.to_thread(
+                    snapshot_download,
+                    repo_id=repo,
+                    cache_dir=cache_dir,
+                    ignore_patterns=["*.h5", "*.ot", "*.msgpack", "*.pkl", "*.pth"]
+                )
+            except Exception as e:
+                logger.error(f"Failed to download {repo}: {str(e)}, retrying in {retry_delay}s...")
+                await asyncio.sleep(retry_delay)
 
         container = None  # Initialize container variable
-        try:
+        
+        # Infinite retry for container execution
+        while True:
+            try:
+                container: Container = await asyncio.to_thread(
+                    client.containers.run,
+                    cst.VALIDATOR_DOCKER_IMAGE,
+                    command=command,
+                    environment=environment,
+                    volumes=volume_bindings,
+                    runtime="nvidia",
+                    device_requests=[docker.types.DeviceRequest(capabilities=[["gpu"]], device_ids=[str(gid) for gid in gpu_ids])],
+                    detach=True,
+                    network_mode="none",
+                )
 
-            container: Container = await asyncio.to_thread(
-                client.containers.run,
-                cst.VALIDATOR_DOCKER_IMAGE,
-                command=command,
-                environment=environment,
-                volumes=volume_bindings,
-                runtime="nvidia",
-                device_requests=[docker.types.DeviceRequest(capabilities=[["gpu"]], device_ids=[str(gid) for gid in gpu_ids])],
-                detach=True,
-                network_mode="none",
-            )
+                log_task = asyncio.create_task(asyncio.to_thread(stream_container_logs, container, None, get_all_context_tags()))
+                result = await asyncio.to_thread(container.wait)
+                log_task.cancel()
 
-            log_task = asyncio.create_task(asyncio.to_thread(stream_container_logs, container, None, get_all_context_tags()))
-            result = await asyncio.to_thread(container.wait)
-            log_task.cancel()
+                if result["StatusCode"] != 0:
+                    raise Exception(f"Container for {repo} exited with non-zero status: {result['StatusCode']}")
 
-            if result["StatusCode"] != 0:
-
-                logger.error(f"Container for {repo} exited with non-zero status: {result['StatusCode']}")
-                evaluation_results[repo] = f"Container for {repo} exited with status {result['StatusCode']}"
-
-            else:
                 eval_results = await get_evaluation_results(container)
                 evaluation_results[repo] = eval_results[repo]
                 if "model_params_count" in eval_results and "model_params_count" not in evaluation_results:
                     evaluation_results["model_params_count"] = eval_results["model_params_count"]
+                break  # Success, exit retry loop
 
-        except Exception as e:
-            logger.error(f"Failed to evaluate repo {repo}: {str(e)}", exc_info=True)
-            evaluation_results[repo] = str(e)
-
-        finally:
-            try:
-                if container is not None:
-                    await asyncio.to_thread(container.remove, force=True)
-                await cleanup_resources(client)
             except Exception as e:
-                logger.info(f"Problem with cleaning up container for {repo}: {e}")
-            client.close()
+                logger.error(f"Failed to evaluate repo {repo}: {str(e)}, retrying in {retry_delay}s...", exc_info=True)
+                if container is not None:
+                    try:
+                        await asyncio.to_thread(container.remove, force=True)
+                    except:
+                        pass
+                await asyncio.sleep(retry_delay)
+                continue
+
+            finally:
+                if container is not None:
+                    try:
+                        await asyncio.to_thread(container.remove, force=True)
+                        await cleanup_resources(client)
+                    except Exception as e:
+                        logger.info(f"Problem with cleaning up container for {repo}: {e}")
+        client.close()
 
     evaluation_results = normalize_rewards_and_compute_loss(evaluation_results)
     logger.info(f"Grpo evaluation results post normalization: {evaluation_results}")
@@ -782,33 +803,46 @@ async def run_evaluation_docker_image(
         "TRANSFORMERS_ALLOW_TORCH_LOAD": "true",
     }
 
+    container = None
+    retry_delay = 5.0
+    
     try:
-        container = await asyncio.to_thread(
-            client.containers.run,
-            cst.VALIDATOR_DOCKER_IMAGE_DIFFUSION,
-            mounts=mounts,
-            environment=environment,
-            runtime="nvidia",
-            device_requests=[docker.types.DeviceRequest(capabilities=[["gpu"]], device_ids=[str(gid) for gid in gpu_ids])],
-            detach=True,
-        )
-        log_task = asyncio.create_task(asyncio.to_thread(stream_container_logs, container, None, get_all_context_tags()))
-        result = await asyncio.to_thread(container.wait)
-        log_task.cancel()
+        while True:
+            try:
+                container = await asyncio.to_thread(
+                    client.containers.run,
+                    cst.VALIDATOR_DOCKER_IMAGE_DIFFUSION,
+                    mounts=mounts,
+                    environment=environment,
+                    runtime="nvidia",
+                    device_requests=[docker.types.DeviceRequest(capabilities=[["gpu"]], device_ids=[str(gid) for gid in gpu_ids])],
+                    detach=True,
+                )
+                log_task = asyncio.create_task(asyncio.to_thread(stream_container_logs, container, None, get_all_context_tags()))
+                result = await asyncio.to_thread(container.wait)
+                log_task.cancel()
 
-        if result["StatusCode"] != 0:
-            raise Exception(f"Container exited with status {result['StatusCode']}")
+                if result["StatusCode"] != 0:
+                    raise Exception(f"Container exited with status {result['StatusCode']}")
 
-        eval_results_dict = await get_evaluation_results(container)
-        return process_evaluation_results(eval_results_dict, is_image=True)
+                eval_results_dict = await get_evaluation_results(container)
+                return process_evaluation_results(eval_results_dict, is_image=True)
 
-    except Exception as e:
-        logger.error(f"Failed to retrieve evaluation results: {str(e)}")
-        raise Exception(f"Failed to retrieve evaluation results: {str(e)}")
+            except Exception as e:
+                logger.error(f"Failed to retrieve evaluation results: {str(e)}, retrying in {retry_delay}s...")
+                if container is not None:
+                    try:
+                        await asyncio.to_thread(container.remove, force=True)
+                        container = None
+                    except:
+                        pass
+                await asyncio.sleep(retry_delay)
+                continue
 
     finally:
         try:
-            await asyncio.to_thread(container.remove, force=True)
+            if container is not None:
+                await asyncio.to_thread(container.remove, force=True)
             await cleanup_resources(client)
             if os.path.exists(dataset_dir):
                 shutil.rmtree(dataset_dir)

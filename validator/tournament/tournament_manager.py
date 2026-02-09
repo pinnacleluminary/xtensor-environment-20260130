@@ -553,7 +553,7 @@ async def populate_tournament_participants(tournament_id: str, config: Config, p
         fee_description = "0.15 TAO"
     elif tournament.tournament_type == TournamentType.ENVIRONMENT:
         participation_fee_rao = t_cst.TOURNAMENT_ENVIRONMENT_PARTICIPATION_FEE_RAO
-        fee_description = "0.25 TAO"
+        fee_description = "0.20 TAO"
     else:
         raise ValueError(f"Unknown tournament type: {tournament.tournament_type}")
 
@@ -1091,12 +1091,10 @@ async def check_and_start_tournament(tournament_type: TournamentType, psql_db: P
             logger.info(f"Pending {tournament_type.value} tournament exists: {pending_of_type[0].tournament_id}")
             return
 
-        # Get the latest completed tournament and check if enough time has passed
+        # Get the latest tournament and check if enough time has passed
         latest_tournament, created_at = await get_latest_tournament_with_created_at(psql_db, tournament_type)
 
-        if latest_tournament and latest_tournament.status == TournamentStatus.COMPLETED:
-            # For completed tournaments, we should check time since completion, not creation
-            # Get the updated_at time which will be the completion time
+        if latest_tournament and latest_tournament.status not in {TournamentStatus.ACTIVE, TournamentStatus.PENDING}:
             completed_at = await get_tournament_completion_time(latest_tournament.tournament_id, psql_db)
             if await should_start_new_tournament_after_interval(completed_at or created_at, tournament_type):
                 logger.info(

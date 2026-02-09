@@ -15,7 +15,6 @@ from fiber.logging_utils import get_logger as fiber_get_logger
 HOSTNAME = socket.gethostname()
 VECTOR_URL = os.getenv("VECTOR_URL", "http://localhost:8689")
 
-
 current_context = ContextVar[dict[str, str | dict]]("current_context", default={})
 
 
@@ -258,3 +257,4 @@ def get_environment_logger(
         logger.addHandler(console)
     
     return logger
+

@@ -230,13 +230,14 @@ async def _insert_grpo_task(connection: Connection, task: GrpoRawTask, task_reco
 async def _insert_env_task(connection: Connection, task: EnvRawTask, task_record: dict) -> None:
     query_env = f"""
         INSERT INTO {cst.ENV_TASKS_TABLE}
-        ({cst.TASK_ID}, {cst.ENVIRONMENT_NAME})
-        VALUES ($1, $2)
+        ({cst.TASK_ID}, {cst.ENVIRONMENT_NAME}, {cst.EVAL_SEED})
+        VALUES ($1, $2, $3)
     """
     await connection.execute(
         query_env,
         task_record[cst.TASK_ID],
-        task.environment_name
+        task.environment_name,
+        task.eval_seed
     )
 
 

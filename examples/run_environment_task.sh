@@ -25,10 +25,10 @@ mkdir -p "$OUTPUTS_DIR"
 chmod 777 "$OUTPUTS_DIR"
 
 # Build the downloader image
-# docker build -t trainer-downloader -f dockerfiles/trainer-downloader.dockerfile .
+docker build -t trainer-downloader -f dockerfiles/trainer-downloader.dockerfile .
 
 # Build the trainer image
-# docker build -t standalone-text-trainer -f dockerfiles/standalone-text-trainer.dockerfile .
+docker build -t standalone-text-trainer -f dockerfiles/standalone-text-trainer.dockerfile .
 
 #Download model and dataset
 echo "Downloading model and dataset..."
@@ -42,23 +42,14 @@ docker run --rm \
   --file-format "$FILE_FORMAT" \
   --task-type "EnvTask"
 
-docker network create tmp_network
-
-docker run -d \
-  --name environment-server \
-  --network tmp_network \
-  -p 10000:8000 \
-  affinefoundation/agentgym:alfworld
 
 docker run --rm --gpus all \
   --security-opt=no-new-privileges \
   --cap-drop=ALL \
   --memory=64g \
   --cpus=8 \
-  --network tmp_network \
   --volume "$CHECKPOINTS_DIR:/cache:rw" \
   --volume "$OUTPUTS_DIR:/app/checkpoints/:rw" \
-  -e ENVIRONMENT_SERVER_URLS="http://environment-server:8000" \
   --name grpo-text-trainer-example \
   standalone-text-trainer \
   --task-id "$TASK_ID" \
