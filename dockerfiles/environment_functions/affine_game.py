@@ -1,69 +1,28 @@
 """
-Optimized Rollout Function implementation for the Affine GAME Environment Task.
-This implementation includes:
-- Full episode training (all turns)
-- Intermediate reward shaping for better credit assignment
-- Robust numeric action parsing with validation
-- Per-prompt game sampling for diversity
-- Enhanced reward calculation with progress tracking
-- Action mask support for cleaner training
-- Better episode tracking and state management
-
 Notes:
 With the Affine GAME environment when you reset to start a new game you have to choose an 'opponent' type to train against.
 Your two options are 'random' and 'mcts'.
-Miners are free to choose which opponent type they train against.
+Miners are free to choose which opponent type they train against. 
 """
 
+import re
+
+
 def extract_and_validate_numeric_action(completion_text: str, valid_action_range: tuple[int, int] = None) -> int | None:
-    """
-    Extract numeric action ID from completion text with validation.
-    Returns action ID or None if invalid.
-    
-    This is critical for chat-capable models that may output verbose responses.
-    """
-    # Clean completion text
     action_candidate = completion_text.strip()
     if action_candidate.endswith("</s>"):
         action_candidate = action_candidate[:-5].strip()
     
-    # Strategy 1: Extract after "Action:" marker
     if "Action:" in action_candidate:
         action_candidate = action_candidate.split("Action:")[-1].strip()
-        # Remove any "Thought:" content
         if "Thought:" in action_candidate:
             action_candidate = action_candidate.split("Thought:")[-1].strip()
     
-    # Strategy 2: Extract first number found (readable approach without regex)
-    # Look for the first sequence of digits, optionally starting with a minus sign
-    number_chars = []
-    found_minus = False
-    found_digit = False
-    
-    for char in action_candidate:
-        if char == '-' and not found_digit and not found_minus:
-            # Found a minus sign at the start of a potential number
-            number_chars.append(char)
-            found_minus = True
-        elif char.isdigit():
-            # Found a digit - add it and mark that we're building a number
-            number_chars.append(char)
-            found_digit = True
-        elif found_digit:
-            # We were building a number but hit a non-digit - stop here
-            break
-        elif found_minus and not char.isdigit():
-            # We had a minus but no digit after it - reset
-            number_chars = []
-            found_minus = False
-    
-    # If we found a number, try to convert it
-    if number_chars and found_digit:
-        number_str = ''.join(number_chars)
+    numbers = re.findall(r'-?\d+', action_candidate)
+    if numbers:
         try:
-            action_id = int(number_str)
+            action_id = int(numbers[0])
             
-            # Validate range if provided
             if valid_action_range:
                 min_action, max_action = valid_action_range
                 if min_action <= action_id <= max_action:
@@ -76,7 +35,6 @@ def extract_and_validate_numeric_action(completion_text: str, valid_action_range
         except ValueError:
             pass
     
-    # Strategy 3: Try direct conversion of the entire cleaned text
     try:
         action_id = int(action_candidate)
         if valid_action_range:
@@ -99,42 +57,27 @@ def calculate_game_shaped_reward(
     max_turns: int,
     game_type: str = "goofspiel"
 ) -> float:
-    """
-    Calculate shaped reward for game environments with intermediate signals.
-    
-    This provides better credit assignment for chat-capable models by:
-    - Rewarding intermediate progress
-    - Encouraging efficient play
-    - Providing signals throughout the episode, not just at the end
-    """
     reward = 0.0
     
-    # Base reward from environment (already includes game score)
     reward += step_reward
     
-    # Reward for improving position (positive reward change)
     if step_reward > previous_reward:
-        reward += 0.05  # Bonus for improving
+        reward += 0.05
     
-    # Reward for maintaining advantage (positive cumulative)
     if cumulative_reward > 0:
-        reward += 0.02  # Small bonus for being ahead
+        reward += 0.02
     
-    # Time efficiency bonus (faster wins are better)
-    if done and step_reward > 0:  # Won the game
+    if done and step_reward > 0:
         efficiency_bonus = (1.0 - (turn_number / max_turns)) * 0.2
         reward += efficiency_bonus
     
-    # Penalty for taking too long (encourage decisive play)
-    if turn_number > max_turns * 0.8:  # Last 20% of turns
+    if turn_number > max_turns * 0.8:
         reward -= 0.01
     
-    # Goofspiel-specific shaping: reward strategic play
     if game_type == "goofspiel":
-        # Reward for maintaining positive cumulative score
-        if cumulative_reward > 0.5:  # Strong lead
+        if cumulative_reward > 0.5:
             reward += 0.03
-        elif cumulative_reward > 0:  # Small lead
+        elif cumulative_reward > 0:
             reward += 0.01
     
     return reward
@@ -147,9 +90,8 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
     import requests
     import json
 
-    # --- Constants for context length management ---
-    MAX_EPISODE_TOKENS = 16384  # Max tokens for completion sequence (truncate if exceeded)
-    MAX_PROMPT_LEN = 24576      # Max prompt tokens before ending episode early
+    MAX_EPISODE_TOKENS = 16384
+    MAX_PROMPT_LEN = 24576
 
     games_to_task_id_range = {
         "goofspiel": (0, 99999999),
@@ -211,14 +153,10 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
     TIMEOUT = 2400
 
     # --- 3. Batch Loop ---
-    # OPTIMIZED: Sample different game_id per prompt for better diversity
     for i, prompt in enumerate(prompts):
-        # Per-prompt game sampling for diversity
         game_id = random.randint(games_to_task_id_range[selected_game][0], games_to_task_id_range[selected_game][1])
         
-        # OPTIMIZED: Vary opponent type for diversity (optional)
-        # opponent_type = random.choice(["random", "mcts"]) if i % 2 == 0 else "mcts"
-        opponent_type = "mcts"  # Keep mcts for now, can be varied
+        opponent_type = "mcts"
         
         episode_prompt_ids: list[int] = []
         episode_completion_ids: list[int] = []
@@ -268,13 +206,11 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
             logprobs = rollout_outputs.get("logprobs", [])
             completion_text = tokenizer.decode(completion_ids, skip_special_tokens=True).strip()
 
-            # Check if prompt exceeds max length - end episode early to prevent context overflow
             if len(prompt_ids) > MAX_PROMPT_LEN:
                 print(f"Warning: Prompt exceeded {MAX_PROMPT_LEN} tokens ({len(prompt_ids)}) at turn {turn_number}, ending episode early")
                 done = True
                 break
 
-            # OPTIMIZED: Full episode training (not just first turn)
             if turn_number == 0:
                 episode_prompt_ids = prompt_ids
                 prev_full_ids = prompt_ids.copy()
@@ -282,16 +218,8 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
                 if prev_full_ids is None:
                     prev_full_ids = prompt_ids.copy()
                 elif prompt_ids[: len(prev_full_ids)] != prev_full_ids:
-                    # BPE mismatch - tokenizer produced different IDs for same prefix text
-                    # Graceful fallback: skip delta masking for this turn, just add completion
-                    print(
-                        f"Warning: BPE mismatch at turn {turn_number} (expected prefix {len(prev_full_ids)}, "
-                        f"got {len(prompt_ids)} tokens). Skipping delta mask for this turn."
-                    )
-                    # Reset prev_full_ids to current prompt to try to recover alignment
                     prev_full_ids = prompt_ids.copy()
                 else:
-                    # Add delta (observations between turns) as non-action tokens
                     delta_prompt_ids = prompt_ids[len(prev_full_ids) :]
                     if delta_prompt_ids:
                         episode_completion_ids.extend(delta_prompt_ids)
@@ -299,7 +227,6 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
                         episode_action_mask.extend([0] * len(delta_prompt_ids))  # Not actions
                     prev_full_ids = prompt_ids.copy()
 
-            # Add completion (action tokens)
             if completion_ids:
                 episode_completion_ids.extend(completion_ids)
                 episode_logprobs.extend(logprobs)
@@ -309,9 +236,6 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
 
             messages.append({"role": "assistant", "content": completion_text})
 
-            # --- Parse and Validate Action (OPTIMIZED) ---
-            # Extract numeric action ID with validation
-            # This is critical for chat-capable models that may output verbose responses
             action_id = extract_and_validate_numeric_action(completion_text)
             
             if action_id is not None:
@@ -319,11 +243,9 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
                 action_to_send = str(action_id)
             else:
                 invalid_action_count += 1
-                # Fallback to "0" or first available action
                 action_to_send = "0"
                 print(f"Warning: Could not extract valid action from: {completion_text[:100]}")
             
-            # --- Step Environment (POST /step) ---
             step_reward = 0.0
             step_done = False
             step_state = ""
@@ -350,13 +272,9 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
                 step_done = False
                 step_state = "Error occurred"
 
-            # Update loop state
-            # In games like Goofspiel, done=True means game ended (win or loss)
-            # Reward can be positive (win) or negative (loss)
             if step_done:
-                solved = True  # Game completed (win or loss)
+                solved = True
 
-            # OPTIMIZED: Calculate shaped reward for this step
             cumulative_reward += step_reward
             shaped_step_reward = calculate_game_shaped_reward(
                 step_reward,
@@ -377,22 +295,17 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
 
             turn_number += 1
 
-        # Truncate episode if completion sequence exceeds max length
         if len(episode_completion_ids) > MAX_EPISODE_TOKENS:
             print(f"Warning: Episode completion exceeded {MAX_EPISODE_TOKENS} tokens ({len(episode_completion_ids)}), truncating")
             episode_completion_ids = episode_completion_ids[:MAX_EPISODE_TOKENS]
             episode_logprobs = episode_logprobs[:MAX_EPISODE_TOKENS]
             episode_action_mask = episode_action_mask[:MAX_EPISODE_TOKENS]
 
-        # OPTIMIZED: Use shaped reward with intermediate signals
-        # Sum all step rewards (already includes shaping)
         if step_rewards:
             train_reward = sum(step_rewards)
         else:
-            # Fallback to simple reward if no steps
             train_reward = step_reward if done else 0.0
         
-        # Additional bonus for action efficiency
         total_actions = valid_action_count + invalid_action_count
         if total_actions > 0:
             action_efficiency = valid_action_count / total_actions
@@ -413,14 +326,8 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
     }
 
 def rollout_reward_func(completions, **kwargs):
-    """
-    Enhanced reward function that extracts shaped rewards from rollout function.
-    The rewards are already shaped with intermediate signals in the rollout function.
-    """
     rewards = kwargs.get("env_rewards") if kwargs else None
     if rewards is not None:
-        # Ensure all rewards are floats and handle any edge cases
         return [float(r) for r in rewards]
     else:
-        # Return zero rewards if not provided (shouldn't happen in normal operation)
         return [0.0] * len(completions)
