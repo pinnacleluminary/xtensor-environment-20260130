@@ -302,7 +302,7 @@ def main():
     )
 
     parser.add_argument(
-        "--reg-ratio", type=float, help="Reg ratio to use for training", default=1.1
+        "--reg-ratio", type=float, help="Reg ratio to use for training", default=1.0999
     )
     parser.add_argument(
         "--wandb-mode",
