@@ -1,10 +1,7 @@
 #!/bin/bash
 set -e
-
 redis-server --daemonize yes
-sleep 10
-
+sleep 2  # Give Redis a moment to start up
 echo "*****Running text trainer"
 source /workspace/.grpo_env/bin/activate
-python3 /workspace/scripts/text_trainer.py "$@"
-deactivate
+python -m text_trainer "$@"

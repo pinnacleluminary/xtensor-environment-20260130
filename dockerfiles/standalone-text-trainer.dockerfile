@@ -1,38 +1,50 @@
-FROM axolotlai/axolotl:main-py3.11-cu128-2.9.1
+FROM runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
 COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /uvx /bin/
 
-ENV UV_SYSTEM_PYTHON=1 \
-    AXOLOTL_DO_NOT_TRACK=1
+# System dependencies
+RUN apt-get update && apt-get install -y \
+    vim \
+    zip \
+    tmux \
+    iotop \
+    nvtop \
+    bmon \
+    wget \
+    nano \
+    zsh \
+    htop \
+    redis-server \
+    && rm -rf /var/lib/apt/lists/*
+# Default dir
+RUN mkdir -p /workspace
+RUN mkdir -p /cache
+RUN mkdir -p /workspace/scripts/datasets
+RUN mkdir -p /app/checkpoints
+WORKDIR /workspace/scripts
 
-# Core deps
-RUN uv pip install packaging setuptools wheel awscli pydantic \
-      mlflow huggingface_hub aiohttp requests toml fastapi \
-      uvicorn httpx loguru python-dotenv scipy numpy datasets \
-      tenacity minio pandas tiktoken sentencepiece peft Pillow \
-      PyYAML textstat langcheck detoxify \
-      git+https://github.com/rayonlabs/fiber@2.4.0 \
-      git+https://github.com/huggingface/trl@07b4a84e0a3c8f37a2508fe177615af019782946
+# # Setup AlfWorld server env
+# COPY scripts/alfworld_setup.sh /workspace/scripts/alfworld_setup.sh
+# COPY scripts/alfworld_run.sh /workspace/scripts/alfworld_run.sh
+# RUN chmod +x /workspace/scripts/alfworld_setup.sh
+# RUN /workspace/scripts/alfworld_setup.sh
 
-RUN uv pip install --no-build-isolation vllm==0.10.2
+# Install main dependencies
+COPY scripts/grpo_requirements.txt /workspace/scripts/grpo_requirements.txt
+RUN python -m venv /workspace/.grpo_env
+RUN bash -c "source /workspace/.grpo_env/bin/activate && \
+    pip install uv && \
+    uv pip install --no-build-isolation -r /workspace/scripts/grpo_requirements.txt && \
+    uv pip install --no-build-isolation flash-attn==2.8.3 && \
+    git clone --depth 1 https://github.com/WooooDyy/AgentGym && \
+    uv pip install --no-build-isolation AgentGym/agentenv && \
+    deactivate"
 
-RUN pip install protobuf==3.20.3
-
-WORKDIR /workspace/axolotl
-RUN mkdir -p /workspace/axolotl/configs \
-    /workspace/axolotl/outputs \
-    /workspace/axolotl/data \
-    /workspace/input_data 
-
-COPY dockerfiles/patches/axolotl_grpo_rollout_fix.py /workspace/axolotl/src/axolotl/core/trainers/grpo/__init__.py
-COPY dockerfiles/environment_functions/ /workspace/axolotl/src
-COPY core /workspace/core
-COPY miner /workspace/miner
-COPY trainer /workspace/trainer
+# Copy current folder to /workspace/auto_ml
 COPY scripts /workspace/scripts
-COPY core/config/base.yml /workspace/axolotl/base.yml
-COPY core/config/base_grpo.yml /workspace/axolotl/base_grpo.yml
-COPY core/config/base_environment.yml /workspace/axolotl/base_environment.yml
+# # Make entrypoint script executable
+# RUN chmod +x /workspace/scripts/alfworld_run.sh
 
-RUN chmod +x /workspace/scripts/run_text_trainer.sh /workspace/scripts/text_trainer.py
+RUN chmod +x /workspace/scripts/run_text_trainer.sh
+# RUN chmod +x /workspace/scripts/entrypoint.sh
 
-ENTRYPOINT ["/workspace/scripts/run_text_trainer.sh"]
+ENTRYPOINT ["./run_text_trainer.sh"]
