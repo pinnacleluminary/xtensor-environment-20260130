@@ -463,9 +463,9 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
         # Initialize curriculum scheduler
         rollout_last_prompt_and_completion_parallelized_curriculum.curriculum = CurriculumScheduler(
             initial_max_turn=trainer.args.initial_max_turn,
-            final_max_turn=45,  # Gin Rummy: games can go up to 30-50 turns
+            final_max_turn=50,  # Gin Rummy: games can go up to 30-50 turns
             rollouts_per_stage=trainer.args.rollouts_per_stage,
-            initial_hint_prob=0.45,  # Lower for complex game
+            initial_hint_prob=0.50,  # Lower for complex game
             final_hint_prob=0.0,
             warmup_rollouts=trainer.args.rollouts_per_stage,
         )
@@ -751,9 +751,9 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
         # Initialize curriculum scheduler
         rollout_full_prompt_and_completion_parallelized_curriculum.curriculum = CurriculumScheduler(
             initial_max_turn=trainer.args.initial_max_turn,
-            final_max_turn=45,
+            final_max_turn=50,
             rollouts_per_stage=trainer.args.rollouts_per_stage,
-            initial_hint_prob=0.45,
+            initial_hint_prob=0.50,
             final_hint_prob=0.0,
             warmup_rollouts=trainer.args.rollouts_per_stage,
         )
