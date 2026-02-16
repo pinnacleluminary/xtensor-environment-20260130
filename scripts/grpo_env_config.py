@@ -23,8 +23,8 @@ GRPO_CONFIG = {
         "use_lora": True,
         "beta": 0.02,
         "num_generations": 4,
-        "initial_max_turn": 1,
-        "rollouts_per_stage": 1600,
+        "initial_max_turn": 3,  # Gin Rummy: Start at 3 turns (longer than Goofspiel)
+        "rollouts_per_stage": 1280,  # Reduced for more frequent curriculum progression
     },
     "1_2_b": {
         "lr": 8e-6,
@@ -35,6 +35,7 @@ GRPO_CONFIG = {
         "vllm_gpu_memory_utilization": 0.4,
         "beta": 0.04,
         "num_generations": 4,
+        "initial_max_turn": 3,
         "rollouts_per_stage": 1280,
     },
     "2_4_b": {
@@ -43,10 +44,12 @@ GRPO_CONFIG = {
         "gpu_count": 2,
         "batch_size": 2,
         "gradient_accumulation_steps": 8,
-        "vllm_gpu_memory_utilization": 0.3,
+        "vllm_gpu_memory_utilization": 0.35,  # Slightly increased for better vLLM performance
         "use_lora": True,
         "beta": 0.01,
         "num_generations": 4,
+        "initial_max_turn": 3,
+        "rollouts_per_stage": 1280,
     },
     "4_5_b": {
         "lr": 6e-6,
@@ -55,8 +58,11 @@ GRPO_CONFIG = {
         "batch_size": 2,
         "gradient_accumulation_steps": 8,
         "use_lora": True,
-        "vllm_gpu_memory_utilization": 0.4,
+        "vllm_gpu_memory_utilization": 0.35,  # Reduced for Gin Rummy
         "beta": 0.01,
+        "num_generations": 4,
+        "initial_max_turn": 3,
+        "rollouts_per_stage": 1280,
     },
     "5_6_b": {
         "lr": 6e-6,
@@ -65,8 +71,11 @@ GRPO_CONFIG = {
         "batch_size": 2,
         "gradient_accumulation_steps": 8,
         "use_lora": True,
-        "vllm_gpu_memory_utilization": 0.4,
+        "vllm_gpu_memory_utilization": 0.35,  # Reduced for Gin Rummy
         "beta": 0.01,
+        "num_generations": 4,
+        "initial_max_turn": 3,
+        "rollouts_per_stage": 1280,
     },
     "6_9_b": {
         "lr": 6e-6,
@@ -75,9 +84,11 @@ GRPO_CONFIG = {
         "batch_size": 2,
         "gradient_accumulation_steps": 4,
         "use_lora": True,
-        "vllm_gpu_memory_utilization": 0.5,
+        "vllm_gpu_memory_utilization": 0.35,  # Reduced for Gin Rummy (longer episodes = more KV cache)
         "beta": 0.01,
-        "rollouts_per_stage": 768,
+        "num_generations": 4,
+        "initial_max_turn": 3,
+        "rollouts_per_stage": 1024,  # Increased from 768 for better curriculum
     },
     "9_12_b": {
         "lr": 6e-6,
@@ -253,8 +264,8 @@ def get_run_cmd(config: dict, gpu_nums: int):
             + " --load_in_4bit True --use_bnb_nested_quant True --bnb_4bit_quant_type nf4"
         )
 
-    if config.get("initial_max_turn", 2) != 2:
-        template = template + f" --initial_max_turn {config.get('initial_max_turn', 2)}"
+    if config.get("initial_max_turn", 3) != 3:
+        template = template + f" --initial_max_turn {config.get('initial_max_turn', 3)}"
     if config.get("rollouts_per_stage", 1280) != 1280:
         template = template + f" --rollouts_per_stage {config.get('rollouts_per_stage', 1280)}"
     return template
@@ -266,7 +277,8 @@ def get_training_json(train_info: dict) -> dict:
     model_architecture = get_model_architecture(model_path)
     param_nums = get_model_num_params(model_name, model_path)
     config = get_grpo_config(param_nums)
-    if model_name == "mistralai/Mistral-7B-Instruct-v0.3":
+    # Special handling for 7B Mistral variants (ensure consistent config)
+    if model_name in ["mistralai/Mistral-7B-Instruct-v0.3", "mistralai/Mistral-7B-Instruct-v0.2"]:
         config = GRPO_CONFIG["6_9_b"]
     print(f"config: {config}")
     run_config = {
@@ -291,7 +303,7 @@ def get_training_json(train_info: dict) -> dict:
         "use_4bit": config.get("use_4bit", False),
         "beta": config.get("beta", 0.01),
         "num_generations": config.get("num_generations", 4),
-        "initial_max_turn": config.get("initial_max_turn", 2),
+        "initial_max_turn": config.get("initial_max_turn", 3),
         "rollouts_per_stage": config.get("rollouts_per_stage", 1280),
     }
 

@@ -163,10 +163,10 @@ class CurriculumScheduler:
     """
     def __init__(
         self,
-        initial_max_turn=1,
-        final_max_turn=13,
+        initial_max_turn=3,
+        final_max_turn=50,  # Gin Rummy: Typical game is 30-50 turns
         rollouts_per_stage=1280,
-        initial_hint_prob=0.75,
+        initial_hint_prob=0.50,  # Lower hint probability for complex game
         final_hint_prob=0.0,
         warmup_rollouts=128,
     ):
@@ -244,7 +244,7 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
         "clobber": (700000000, 799999999),
     }
 
-    selected_game = "goofspiel"
+    selected_game = "gin_rummy"
     
     # --- 1. Static Initialization (Once per Rank) ---
     # We check if the function has already established a connection for this worker
@@ -270,7 +270,7 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
         # Create environment (POST /create) - ONLY ONCE
         try:
             print(f"Initializing environment on rank {rank} at {base_url}...")
-            payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts"}
+            payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
             create_res = requests.post(f"{base_url}/reset", json=payload, timeout=300)
             create_res.raise_for_status()
             rollout_first_prompt_and_completion.initialized = True
@@ -305,7 +305,7 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
         turn_number = 0
         
         # --- Reset Environment (POST /reset) ---
-        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts"}
+        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
         
         try:
             reset_res = requests.post(f"{env_endpoint}/reset", json=payload, timeout=TIMEOUT)
@@ -426,7 +426,7 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
         "clobber": (700000000, 799999999),
     }
 
-    selected_game = "goofspiel"
+    selected_game = "gin_rummy"
 
     # --- 1. Static Initialization (Once per Rank) ---
     if not getattr(rollout_last_prompt_and_completion_parallelized_curriculum, "initialized", False):
@@ -443,7 +443,7 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
             try:
                 print(f"[INIT] Initializing env on server {idx}: {base_url}")
                 # Initialize with a test reset to ensure server is ready
-                payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts"}
+                payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
                 res = requests.post(f"{base_url}/reset", json=payload, timeout=300)
                 res.raise_for_status()
                 env_pool.append({"base_url": base_url})
@@ -463,13 +463,13 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
         # Initialize curriculum scheduler
         rollout_last_prompt_and_completion_parallelized_curriculum.curriculum = CurriculumScheduler(
             initial_max_turn=trainer.args.initial_max_turn,
-            final_max_turn=13,
+            final_max_turn=45,  # Gin Rummy: games can go up to 30-50 turns
             rollouts_per_stage=trainer.args.rollouts_per_stage,
-            initial_hint_prob=0.75,
+            initial_hint_prob=0.45,  # Lower for complex game
             final_hint_prob=0.0,
             warmup_rollouts=trainer.args.rollouts_per_stage,
         )
-        print(f"[CURRICULUM] Initialized with initial_max_turn={trainer.args.initial_max_turn}, final_max_turn=13, rollouts_per_stage={trainer.args.rollouts_per_stage}, initial_hint_prob=0.75, final_hint_prob=0.0, warmup_rollouts={trainer.args.rollouts_per_stage}")
+        print(f"[CURRICULUM] Initialized with initial_max_turn={trainer.args.initial_max_turn}, final_max_turn=50, rollouts_per_stage={trainer.args.rollouts_per_stage}, initial_hint_prob=0.50, final_hint_prob=0.0, warmup_rollouts={trainer.args.rollouts_per_stage}")
 
     # Retrieve static variables
     rank = rollout_last_prompt_and_completion_parallelized_curriculum.rank
@@ -504,7 +504,7 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
         use_hints = random.random() < current_hint_prob
 
         # --- Reset Environment (POST /reset) ---
-        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts"}
+        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
 
         try:
             reset_res = requests.post(f"{env_endpoint}/reset", json=payload, timeout=TIMEOUT)
@@ -524,12 +524,12 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
             return index, None
 
         # --- Build Conversation History ---
-        # Fisrt make system prompt
-        system_prompt = "You are playing goofspiel.\n\n# Game Rules\nGOOFSPIEL RULES:\nSetup: Each player has bid cards numbered 1 to N. A prize deck with cards 1 to N is shuffled.\nGoal: Win the most points by bidding on prize cards.\n\nEach turn:\n1. Reveal top prize card (worth its face value in points)\n2. Players simultaneously play one bid card from their hand\n3. Highest bidder wins the prize card (adds its value to score)\n4. If bids tie, prize card is discarded (no one gets points)\n\nWinning: Player with most points after all rounds wins.\n\n\n# Output Format\nYou must respond with ONLY the action ID (a single number).\nDo NOT include descriptions or explanations.\n\nExamples:\n- For action \"0 -> roll\": respond \"0\"\n- For action \"89 -> a3\": respond \"89\""
+        # First make system prompt
+        system_prompt = "You are playing Gin Rummy.\n\n# Game Rules\nGIN RUMMY RULES:\nSetup: Standard 52-card deck. Each player starts with 10 cards.\nGoal: Form sets (3-4 of same rank) and runs (3+ consecutive cards of same suit) to minimize deadwood points.\n\nEach turn:\n1. Draw a card (from deck or discard pile)\n2. Discard a card to the discard pile\n3. Try to form melds (sets/runs) to reduce deadwood\n4. Knock when deadwood ≤ 10 points, or Gin when deadwood = 0\n\nScoring:\n- Gin (0 deadwood): 25 points + opponent's deadwood\n- Knock: Difference in deadwood (if you have less)\n- Undercut: Opponent wins if they have equal or less deadwood\n\nCard Values: Ace=1, 2-10=face value, Face cards=10\n\n# Output Format\nYou must respond with ONLY the action ID (a single number).\nDo NOT include descriptions or explanations.\n\nExamples:\n- For action \"0 -> draw from deck\": respond \"0\"\n- For action \"5 -> discard 7♠\": respond \"5\"\n- For action \"89 -> knock\": respond \"89\""
 
         # Add suggestion for playing strategy based on curriculum
         if use_hints:
-            suggestion_prompt = "\n\nDon't think for long. The best strategies is to bid the card with same value as the point card \n\nExample: \nIf the point card is 1, bid using card 1, likely action ID 0\nIf the point card is 13, bid using card 13, likely action ID 12\nIf the point card is 10, bid using card 10, likely action ID 9\nAlways bid following this strategy to maximize your winning chance."
+            suggestion_prompt = "\n\n# Strategy Tips\n- Early game: Draw from deck to see more cards\n- Build runs and sets to reduce deadwood\n- Track opponent's discards to guess their hand\n- Knock when you have ≤10 deadwood points and think you're ahead\n- Go for Gin (0 deadwood) when close for bonus points"
             system_prompt += suggestion_prompt
 
         messages = [{"role": "system", "content": system_prompt}]
@@ -578,7 +578,6 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
             return index, None
 
         messages.append({"role": "user", "content": formatted_observation})
-        prize_card = extract_prize_card(formatted_observation)
 
         with rollout_last_prompt_and_completion_parallelized_curriculum.generation_semaphore:
             rollout_out = generate_rollout_completions(
@@ -601,11 +600,7 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
         if "Action:" in action_to_send:
             action_to_send = action_to_send.split("Action:")[-1].strip()
 
-        # Check strategy adherence for training turn
-        bid_card = extract_bid_from_action(action_to_send, formatted_observation)
-        strategy_followed = (
-            bid_card is not None and prize_card is not None and bid_card == prize_card
-        )
+        strategy_followed = False  # No simple strategy for complex games
 
         # Step environment with model's action
         invalid_action = False
@@ -719,7 +714,7 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
         "clobber": (700000000, 799999999),
     }
 
-    selected_game = "goofspiel"
+    selected_game = "gin_rummy"
 
     # --- 1. Static Initialization (Once per Rank) ---
     if not getattr(rollout_full_prompt_and_completion_parallelized_curriculum, "initialized", False):
@@ -736,7 +731,7 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
             try:
                 print(f"[INIT] Initializing env on server {idx}: {base_url}")
                 # Initialize with a test reset to ensure server is ready
-                payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts"}
+                payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
                 res = requests.post(f"{base_url}/reset", json=payload, timeout=300)
                 res.raise_for_status()
                 env_pool.append({"base_url": base_url})
@@ -756,13 +751,13 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
         # Initialize curriculum scheduler
         rollout_full_prompt_and_completion_parallelized_curriculum.curriculum = CurriculumScheduler(
             initial_max_turn=trainer.args.initial_max_turn,
-            final_max_turn=13,
+            final_max_turn=45,
             rollouts_per_stage=trainer.args.rollouts_per_stage,
-            initial_hint_prob=0.75,
+            initial_hint_prob=0.45,
             final_hint_prob=0.0,
             warmup_rollouts=trainer.args.rollouts_per_stage,
         )
-        print(f"[CURRICULUM] Initialized with initial_max_turn={trainer.args.initial_max_turn}, final_max_turn=13, rollouts_per_stage={trainer.args.rollouts_per_stage}, initial_hint_prob=0.75, final_hint_prob=0.0, warmup_rollouts={trainer.args.rollouts_per_stage}")
+        print(f"[CURRICULUM] Initialized with initial_max_turn={trainer.args.initial_max_turn}, final_max_turn=50, rollouts_per_stage={trainer.args.rollouts_per_stage}, initial_hint_prob=0.50, final_hint_prob=0.0, warmup_rollouts={trainer.args.rollouts_per_stage}")
 
     # Retrieve static variables
     rank = rollout_full_prompt_and_completion_parallelized_curriculum.rank
@@ -809,7 +804,7 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
         use_hints = random.random() < current_hint_prob
 
         # --- Reset Environment (POST /reset) ---
-        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts"}
+        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
 
         try:
             reset_res = requests.post(f"{env_endpoint}/reset", json=payload, timeout=TIMEOUT)
@@ -829,20 +824,18 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
             return index, None
 
         # --- Build Conversation History ---
-        # Fisrt make system prompt
-        system_prompt = "You are playing goofspiel.\n\n# Game Rules\nGOOFSPIEL RULES:\nSetup: Each player has bid cards numbered 1 to N. A prize deck with cards 1 to N is shuffled.\nGoal: Win the most points by bidding on prize cards.\n\nEach turn:\n1. Reveal top prize card (worth its face value in points)\n2. Players simultaneously play one bid card from their hand\n3. Highest bidder wins the prize card (adds its value to score)\n4. If bids tie, prize card is discarded (no one gets points)\n\nWinning: Player with most points after all rounds wins.\n\n\n# Output Format\nYou must respond with ONLY the action ID (a single number).\nDo NOT include descriptions or explanations.\n\nExamples:\n- For action \"0 -> roll\": respond \"0\"\n- For action \"89 -> a3\": respond \"89\""
+        # First make system prompt
+        system_prompt = "You are playing Gin Rummy.\n\n# Game Rules\nGIN RUMMY RULES:\nSetup: Standard 52-card deck. Each player starts with 10 cards.\nGoal: Form sets (3-4 of same rank) and runs (3+ consecutive cards of same suit) to minimize deadwood points.\n\nEach turn:\n1. Draw a card (from deck or discard pile)\n2. Discard a card to the discard pile\n3. Try to form melds (sets/runs) to reduce deadwood\n4. Knock when deadwood ≤ 10 points, or Gin when deadwood = 0\n\nScoring:\n- Gin (0 deadwood): 25 points + opponent's deadwood\n- Knock: Difference in deadwood (if you have less)\n- Undercut: Opponent wins if they have equal or less deadwood\n\nCard Values: Ace=1, 2-10=face value, Face cards=10\n\n# Output Format\nYou must respond with ONLY the action ID (a single number).\nDo NOT include descriptions or explanations.\n\nExamples:\n- For action \"0 -> draw from deck\": respond \"0\"\n- For action \"5 -> discard 7♠\": respond \"5\"\n- For action \"89 -> knock\": respond \"89\""
 
         # Add suggestion for playing strategy based on curriculum
         if use_hints:
-            suggestion_prompt = "\n\nThe best strategies is to bid the card with same value as the point card \n\nExample: \nIf the point card is 1, bid using card 1, likely action ID 0\nIf the point card is 13, bid using card 13, likely action ID 12\nIf the point card is 10, bid using card 10, likely action ID 9\nAlways bid following this strategy to maximize your winning chance."
+            suggestion_prompt = "\n\n# Strategy Tips\n- Early game: Draw from deck to see more cards\n- Build runs and sets to reduce deadwood\n- Track opponent's discards to guess their hand\n- Knock when you have ≤10 deadwood points and think you're ahead\n- Go for Gin (0 deadwood) when close for bonus points"
             system_prompt += suggestion_prompt
 
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": formatted_observation}]
 
         # --- Interaction Loop ---
         while not done and (turn_number < current_max_turn):
-            # Extract prize card before taking action
-            prize_card = extract_prize_card(formatted_observation)
             
             # Generate Rollout Completion
             # Only allow one thread to generate rollout completions at a time
@@ -899,24 +892,7 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
             # Parse ReAct format
             if "Action:" in action_to_send:
                 action_to_send = action_to_send.split("Action:")[-1].strip()
-                
-            # --- Check Strategy Adherence ---
-            bid_card = extract_bid_from_action(action_to_send, formatted_observation)
-            if bid_card is not None:
-                total_strategy_opportunities += 1
-                if bid_card == prize_card and all_steps_correct:
-                    strategy_followed_count += 1
-                    # Give immediate reward for following strategy
-                    step_reward = STEP_STRATEGY_REWARD
-                    step_rewards.append(step_reward)
-                else:
-                    all_steps_correct = False
-                    step_rewards.append(0.0)
-            else:
-                # Invalid action - counts as a strategy opportunity that was NOT followed
-                total_strategy_opportunities += 1
-                all_steps_correct = False
-                step_rewards.append(0.0)
+            step_rewards.append(0.0)
 
             # --- Step Environment (POST /step) ---
             try:
@@ -958,31 +934,20 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
             episode_action_mask = episode_action_mask[:MAX_EPISODE_TOKENS]
             
         # --- Calculate Final Reward with Strategy Shaping ---
-        # Strategy adherence ratio
-        strategy_ratio = strategy_followed_count / total_strategy_opportunities if total_strategy_opportunities > 0 else 0.0
+        strategy_ratio = 0.0
         
         # Combine immediate step rewards
         immediate_rewards = sum(step_rewards)
         
-        # For short episodes (curriculum learning), prioritize strategy adherence
-        # For full episodes, blend strategy with final score
-        if not done:
-            # Partial episode - focus on strategy
-            shaped_reward = immediate_rewards + strategy_ratio
-        else:
-            # Full episode - blend strategy adherence with final score
-            shaped_reward = (
-                STRATEGY_REWARD_WEIGHT * strategy_ratio +
-                (1 - STRATEGY_REWARD_WEIGHT) * train_reward +
-                immediate_rewards
-            )
-
+        # Use final game score as the primary reward
+        shaped_reward = train_reward + immediate_rewards
+        
         # Apply invalid action penalty
         shaped_reward = shaped_reward - 0.05 * float(invalid_count)
 
         # Log in one line
         print("============")
-        print(f"id: {game_id}, max_turn: {current_max_turn}, hints: {use_hints}", f"Strategy: {strategy_followed_count}/{total_strategy_opportunities} ({strategy_ratio:.2%})")
+        print(f"id: {game_id}, max_turn: {current_max_turn}, hints: {use_hints}, final_score: {train_reward:.3f}, reward: {shaped_reward:.3f}")
         print("============")
 
         return index, {
