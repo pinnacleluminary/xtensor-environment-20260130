@@ -213,9 +213,9 @@ class CurriculumScheduler:
     def __init__(
         self,
         initial_max_turn=3,
-        final_max_turn=50,  # Gin Rummy: Typical game is 30-50 turns
+        final_max_turn=45,  # Gin Rummy: Typical game is 30-50 turns
         rollouts_per_stage=1280,
-        initial_hint_prob=0.50,  # Lower hint probability for complex game
+        initial_hint_prob=0.45,  # Lower hint probability for complex game
         final_hint_prob=0.0,
         warmup_rollouts=128,
     ):
@@ -529,7 +529,7 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
             final_hint_prob=0.0,
             warmup_rollouts=trainer.args.rollouts_per_stage,
         )
-        print(f"[CURRICULUM] Initialized with initial_max_turn={trainer.args.initial_max_turn}, final_max_turn=50, rollouts_per_stage={trainer.args.rollouts_per_stage}, initial_hint_prob=0.50, final_hint_prob=0.0, warmup_rollouts={trainer.args.rollouts_per_stage}")
+        print(f"[CURRICULUM] Initialized with initial_max_turn={trainer.args.initial_max_turn}, final_max_turn=45, rollouts_per_stage={trainer.args.rollouts_per_stage}, initial_hint_prob=0.45, final_hint_prob=0.0, warmup_rollouts={trainer.args.rollouts_per_stage}")
 
     # Retrieve static variables
     rank = rollout_last_prompt_and_completion_parallelized_curriculum.rank
@@ -836,7 +836,7 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
             final_hint_prob=0.0,
             warmup_rollouts=trainer.args.rollouts_per_stage,
         )
-        print(f"[CURRICULUM] Initialized with initial_max_turn={trainer.args.initial_max_turn}, final_max_turn=50, rollouts_per_stage={trainer.args.rollouts_per_stage}, initial_hint_prob=0.50, final_hint_prob=0.0, warmup_rollouts={trainer.args.rollouts_per_stage}")
+        print(f"[CURRICULUM] Initialized with initial_max_turn={trainer.args.initial_max_turn}, final_max_turn=45, rollouts_per_stage={trainer.args.rollouts_per_stage}, initial_hint_prob=0.45, final_hint_prob=0.0, warmup_rollouts={trainer.args.rollouts_per_stage}")
 
     # Retrieve static variables
     rank = rollout_full_prompt_and_completion_parallelized_curriculum.rank
