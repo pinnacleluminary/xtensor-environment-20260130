@@ -23,8 +23,8 @@ GRPO_CONFIG = {
         "use_lora": True,
         "beta": 0.02,
         "num_generations": 4,
-        "initial_max_turn": 3,  # Gin Rummy: Start at 3 turns (longer than Goofspiel)
-        "rollouts_per_stage": 1280,  # Reduced for more frequent curriculum progression
+        "initial_max_turn": 3,
+        "rollouts_per_stage": 1280,
     },
     "1_2_b": {
         "lr": 8e-6,
@@ -44,7 +44,7 @@ GRPO_CONFIG = {
         "gpu_count": 2,
         "batch_size": 2,
         "gradient_accumulation_steps": 8,
-        "vllm_gpu_memory_utilization": 0.35,  # Slightly increased for better vLLM performance
+        "vllm_gpu_memory_utilization": 0.35,
         "use_lora": True,
         "beta": 0.01,
         "num_generations": 4,
@@ -58,7 +58,7 @@ GRPO_CONFIG = {
         "batch_size": 2,
         "gradient_accumulation_steps": 8,
         "use_lora": True,
-        "vllm_gpu_memory_utilization": 0.35,  # Reduced for Gin Rummy
+        "vllm_gpu_memory_utilization": 0.35,
         "beta": 0.01,
         "num_generations": 4,
         "initial_max_turn": 3,
@@ -71,7 +71,7 @@ GRPO_CONFIG = {
         "batch_size": 2,
         "gradient_accumulation_steps": 8,
         "use_lora": True,
-        "vllm_gpu_memory_utilization": 0.35,  # Reduced for Gin Rummy
+        "vllm_gpu_memory_utilization": 0.35,
         "beta": 0.01,
         "num_generations": 4,
         "initial_max_turn": 3,
@@ -84,11 +84,11 @@ GRPO_CONFIG = {
         "batch_size": 2,
         "gradient_accumulation_steps": 4,
         "use_lora": True,
-        "vllm_gpu_memory_utilization": 0.35,  # Reduced for Gin Rummy (longer episodes = more KV cache)
+        "vllm_gpu_memory_utilization": 0.35,
         "beta": 0.01,
         "num_generations": 4,
         "initial_max_turn": 3,
-        "rollouts_per_stage": 1024,  # Increased from 768 for better curriculum
+        "rollouts_per_stage": 1024,
     },
     "9_12_b": {
         "lr": 6e-6,
@@ -96,8 +96,12 @@ GRPO_CONFIG = {
         "gpu_count": 4,
         "use_lora": True,
         "batch_size": 16,
+        "gradient_accumulation_steps": 4,  # Added for consistency
         "vllm_gpu_memory_utilization": 0.6,
         "beta": 0.01,
+        "num_generations": 4,  # Added for Gin Rummy consistency
+        "initial_max_turn": 3,  # Added for Gin Rummy curriculum
+        "rollouts_per_stage": 1280,  # Added for Gin Rummy curriculum
     },
     "12_15_b": {
         "lr": 5e-6,
@@ -105,8 +109,12 @@ GRPO_CONFIG = {
         "gpu_count": 4,
         "use_lora": True,
         "batch_size": 2,
-        "vllm_gpu_memory_utilization": 0.8,
+        "gradient_accumulation_steps": 4,  # Added for consistency
+        "vllm_gpu_memory_utilization": 0.65,  # Reduced from 0.8 to prevent OOM with longer Gin Rummy episodes (30-50 turns)
         "beta": 0.01,
+        "num_generations": 4,  # Added for Gin Rummy consistency
+        "initial_max_turn": 3,  # Added for Gin Rummy curriculum
+        "rollouts_per_stage": 1280,  # Added for Gin Rummy curriculum
     },
     "15_20_b": {
         "lr": 5e-6,
@@ -114,9 +122,13 @@ GRPO_CONFIG = {
         "gpu_count": 4,
         "use_lora": True,
         "batch_size": 16,
+        "gradient_accumulation_steps": 4,  # Added for consistency
         "vllm_gpu_memory_utilization": 0.6,
         "use_vllm": False,
         "beta": 0.01,
+        "num_generations": 4,  # Added for Gin Rummy consistency
+        "initial_max_turn": 3,  # Added for Gin Rummy curriculum
+        "rollouts_per_stage": 1280,  # Added for Gin Rummy curriculum
     },
     "20_40_b": {
         "lr": 4e-6,
@@ -124,10 +136,14 @@ GRPO_CONFIG = {
         "gpu_count": 8,
         "use_lora": True,
         "batch_size": 16,
+        "gradient_accumulation_steps": 4,  # Added for consistency
         "vllm_gpu_memory_utilization": 0.6,
         "use_vllm": False,
         "use_4bit": True,
         "beta": 0.01,
+        "num_generations": 4,  # Added for Gin Rummy consistency
+        "initial_max_turn": 3,  # Added for Gin Rummy curriculum
+        "rollouts_per_stage": 1280,  # Added for Gin Rummy curriculum
     },
     "40_80_b": {
         "lr": 3e-6,
@@ -135,10 +151,14 @@ GRPO_CONFIG = {
         "gpu_count": 8,
         "use_lora": True,
         "batch_size": 2,
+        "gradient_accumulation_steps": 4,  # Added for consistency
         "vllm_gpu_memory_utilization": 0.7,
         "use_vllm": False,
         "use_4bit": True,
         "beta": 0.01,
+        "num_generations": 4,  # Added for Gin Rummy consistency
+        "initial_max_turn": 3,  # Added for Gin Rummy curriculum
+        "rollouts_per_stage": 1280,  # Added for Gin Rummy curriculum
     },
 }
 
