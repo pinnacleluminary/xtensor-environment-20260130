@@ -19,25 +19,24 @@ GRPO_CONFIG = {
         "gpu_count": 1,
         "batch_size": 4,
         "gradient_accumulation_steps": 6,
-        "vllm_gpu_memory_utilization": 0.4,
+        "vllm_gpu_memory_utilization": 0.5,
         "use_lora": True,
-        "beta": 0.08,
+        "beta": 0.03,
         "num_generations": 4,
-        "initial_max_turn": 3,
-        "rollouts_per_stage": 1536,
+        "initial_max_turn": 2,  
+        "rollouts_per_stage": 1024,  
     },
     "1_2_b": {
-        "lr": 8e-6,
+        "lr": 9e-6,
         "distributed": "ddp",
         "gpu_count": 1,
         "batch_size": 3,
-        "gradient_accumulation_steps": 12,
+        "gradient_accumulation_steps": 10,
         "vllm_gpu_memory_utilization": 0.4,
-        "use_lora": True,
-        "beta": 0.10,
+        "beta": 0.05,
         "num_generations": 4,
         "initial_max_turn": 3,
-        "rollouts_per_stage": 1536,
+        "rollouts_per_stage": 1024,
     },
     "2_4_b": {
         "lr": 8e-6,
@@ -45,12 +44,12 @@ GRPO_CONFIG = {
         "gpu_count": 2,
         "batch_size": 2,
         "gradient_accumulation_steps": 8,
-        "vllm_gpu_memory_utilization": 0.35,
+        "vllm_gpu_memory_utilization": 0.38,  # Slightly increased for better vLLM performance
         "use_lora": True,
-        "beta": 0.10,
+        "beta": 0.01,
         "num_generations": 4,
         "initial_max_turn": 3,
-        "rollouts_per_stage": 1536,
+        "rollouts_per_stage": 1024,
     },
     "4_5_b": {
         "lr": 6e-6,
@@ -59,11 +58,11 @@ GRPO_CONFIG = {
         "batch_size": 2,
         "gradient_accumulation_steps": 8,
         "use_lora": True,
-        "vllm_gpu_memory_utilization": 0.35,
-        "beta": 0.10,
+        "vllm_gpu_memory_utilization": 0.38,  
+        "beta": 0.01,
         "num_generations": 4,
         "initial_max_turn": 3,
-        "rollouts_per_stage": 1536,
+        "rollouts_per_stage": 1024,
     },
     "5_6_b": {
         "lr": 6e-6,
@@ -72,24 +71,24 @@ GRPO_CONFIG = {
         "batch_size": 2,
         "gradient_accumulation_steps": 8,
         "use_lora": True,
-        "vllm_gpu_memory_utilization": 0.35,
-        "beta": 0.10,
+        "vllm_gpu_memory_utilization": 0.38,  
+        "beta": 0.01,
         "num_generations": 4,
         "initial_max_turn": 3,
-        "rollouts_per_stage": 1536,
+        "rollouts_per_stage": 1024,
     },
     "6_9_b": {
         "lr": 6e-6,
         "distributed": "ddp",
         "gpu_count": 4,
+        "use_lora": True,
         "batch_size": 2,
         "gradient_accumulation_steps": 4,
-        "use_lora": True,
-        "vllm_gpu_memory_utilization": 0.35,
-        "beta": 0.10,
+        "vllm_gpu_memory_utilization": 0.38,  
+        "beta": 0.02,
         "num_generations": 4,
         "initial_max_turn": 3,
-        "rollouts_per_stage": 1280,
+        "rollouts_per_stage": 1024, 
     },
     "9_12_b": {
         "lr": 6e-6,
@@ -99,7 +98,7 @@ GRPO_CONFIG = {
         "batch_size": 16,
         "gradient_accumulation_steps": 4,
         "vllm_gpu_memory_utilization": 0.6,
-        "beta": 0.12,
+        "beta": 0.01,
         "num_generations": 4,
         "initial_max_turn": 3,
         "rollouts_per_stage": 1280,
@@ -111,8 +110,8 @@ GRPO_CONFIG = {
         "use_lora": True,
         "batch_size": 2,
         "gradient_accumulation_steps": 8,
-        "vllm_gpu_memory_utilization": 0.65,
-        "beta": 0.12,
+        "vllm_gpu_memory_utilization": 0.8,
+        "beta": 0.01,
         "num_generations": 4,
         "initial_max_turn": 3,
         "rollouts_per_stage": 1280,
@@ -126,7 +125,7 @@ GRPO_CONFIG = {
         "gradient_accumulation_steps": 4,
         "vllm_gpu_memory_utilization": 0.6,
         "use_vllm": False,
-        "beta": 0.12,
+        "beta": 0.01,
         "num_generations": 4,
         "initial_max_turn": 3,
         "rollouts_per_stage": 1280,
@@ -141,7 +140,7 @@ GRPO_CONFIG = {
         "vllm_gpu_memory_utilization": 0.6,
         "use_vllm": False,
         "use_4bit": True,
-        "beta": 0.15,
+        "beta": 0.01,
         "num_generations": 4,
         "initial_max_turn": 3,
         "rollouts_per_stage": 1280,
@@ -156,7 +155,7 @@ GRPO_CONFIG = {
         "vllm_gpu_memory_utilization": 0.7,
         "use_vllm": False,
         "use_4bit": True,
-        "beta": 0.15,
+        "beta": 0.01,
         "num_generations": 4,
         "initial_max_turn": 3,
         "rollouts_per_stage": 1024,
@@ -287,8 +286,8 @@ def get_run_cmd(config: dict, gpu_nums: int):
 
     if config.get("initial_max_turn", 3) != 3:
         template = template + f" --initial_max_turn {config.get('initial_max_turn', 3)}"
-    if config.get("rollouts_per_stage", 1536) != 1536:
-        template = template + f" --rollouts_per_stage {config.get('rollouts_per_stage', 1536)}"
+    if config.get("rollouts_per_stage", 1024) != 1024:
+        template = template + f" --rollouts_per_stage {config.get('rollouts_per_stage', 1024)}"
     return template
 
 
@@ -298,7 +297,6 @@ def get_training_json(train_info: dict) -> dict:
     model_architecture = get_model_architecture(model_path)
     param_nums = get_model_num_params(model_name, model_path)
     config = get_grpo_config(param_nums)
-    # Special handling for 7B Mistral variants (ensure consistent config)
     if model_name in ["mistralai/Mistral-7B-Instruct-v0.3", "mistralai/Mistral-7B-Instruct-v0.2"]:
         config = GRPO_CONFIG["6_9_b"]
     print(f"config: {config}")
@@ -325,7 +323,7 @@ def get_training_json(train_info: dict) -> dict:
         "beta": config.get("beta", 0.01),
         "num_generations": config.get("num_generations", 4),
         "initial_max_turn": config.get("initial_max_turn", 3),
-        "rollouts_per_stage": config.get("rollouts_per_stage", 1536),
+        "rollouts_per_stage": config.get("rollouts_per_stage", 1024),
     }
 
     if model_name == "OpenAssistant/oasst-sft-4-pythia-12b-epoch-3.5":
