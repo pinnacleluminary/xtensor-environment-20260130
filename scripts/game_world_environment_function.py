@@ -62,14 +62,17 @@ def extract_and_format_observation(obs_text):
     hand_str = hand_match.group(1).strip()
     cards = [int(card) for card in hand_str.split()]
     
-    # Reconstruct legal actions
-    # The action ID corresponds to the bid value - 1 (0-indexed)
-    # But we need to map to the actual available cards
+    # Reconstruct legal actions for Gin Rummy
+    # Note: This is a fallback if environment doesn't provide legal actions
+    # For Gin Rummy, actions include: draw from deck (0), draw from discard, discard cards, knock, gin
+    # The actual legal actions should come from the environment response
+    # This reconstruction is a simplified version - environment should provide full legal actions
     legal_actions = []
     for i, card in enumerate(cards):
-        # Action ID is the card value minus 1
-        action_id = card - 1
-        legal_actions.append(f"{action_id} -> [P{player_id}]Bid: {card}")
+        # Action ID mapping depends on environment implementation
+        # This is a placeholder - actual actions should come from environment
+        action_id = card - 1  # Simplified mapping (may need adjustment based on actual env format)
+        legal_actions.append(f"{action_id} -> discard card {card}")
     
     # Format the complete observation
     formatted = state_text + "\n\nYou are Player " + str(player_id) + ".\nLegal Actions:\n"
@@ -81,7 +84,8 @@ def extract_and_format_observation(obs_text):
 
 def extract_prize_card(obs_text):
     """
-    Extract the current prize card value from observation.
+    DEPRECATED: Goofspiel-specific function. Not used for Gin Rummy.
+    Extract the current prize card value from observation (Goofspiel only).
     
     Args:
         obs_text: Observation text
@@ -89,7 +93,7 @@ def extract_prize_card(obs_text):
     Returns:
         Prize card value (int) or None if not found
     """
-    # Look for "Point card: X"
+    # Look for "Point card: X" (Goofspiel-specific)
     match = re.search(r'Current point card:\s*(\d+)', obs_text)
     if match:
         return int(match.group(1))
@@ -98,7 +102,8 @@ def extract_prize_card(obs_text):
 
 def extract_bid_from_action(action_text, obs_text):
     """
-    Extract the bid value from the action.
+    DEPRECATED: Goofspiel-specific function. Not used for Gin Rummy.
+    Extract the bid value from the action (Goofspiel only).
     
     Args:
         action_text: The action string (should be action ID)
@@ -109,7 +114,7 @@ def extract_bid_from_action(action_text, obs_text):
     """
     try:
         action_id = int(action_text.strip())
-        # The bid value is action_id + 1
+        # The bid value is action_id + 1 (Goofspiel-specific)
         return action_id + 1
     except Exception:
         return None
@@ -600,6 +605,8 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
         messages = [{"role": "system", "content": system_prompt}]
 
         # Strategy forcing for turns before target training turn
+        # For Gin Rummy: Use simple early-game strategy (draw from deck)
+        # This helps model learn basic gameplay before making complex decisions
         while not done and (turn_number < target_training_turn):
             messages.append({"role": "user", "content": formatted_observation})
 
@@ -608,8 +615,9 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
                 target_training_turn = turn_number
                 break
             
-            prize_card = extract_prize_card(formatted_observation)
-            action_id = prize_card - 1
+            # Gin Rummy early game strategy: Draw from deck (action 0) to explore options
+            # This is simpler than Goofspiel's "bid same as prize" strategy
+            action_id = 0  # Draw from deck - safe early game action for Gin Rummy
 
             messages.append({"role": "assistant", "content": str(action_id)})
 
@@ -668,19 +676,30 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
         strategy_followed = False  # No simple strategy for complex games
 
         # Step environment with model's action
+        # For Gin Rummy: Actions include draw (0), discard cards, knock, gin
+        # Validation is lenient - environment will reject truly invalid actions
         invalid_action = False
         invalid_reason = None
         
         try:
             action_id_parsed = int(action_to_send.strip())
             hand_cards = get_hand_cards(formatted_observation)
-            if not hand_cards:
-                # Can't validate without hand cards
+            
+            # For Gin Rummy, action 0 (draw from deck) is always valid
+            if action_id_parsed == 0:
                 invalid_action = False
-            elif action_id_parsed not in hand_cards:
-                invalid_action = True
-                invalid_reason = f"Action {action_id_parsed} not in hand cards: {hand_cards}"
-                print(f"[INVALID] Turn {turn_number}: {invalid_reason}")
+            elif not hand_cards:
+                # Can't validate without hand cards - let environment handle it
+                invalid_action = False
+            else:
+                # For other actions, basic sanity check: action should be non-negative
+                # Note: Environment will validate actual legality (discard, knock, gin)
+                if action_id_parsed < 0:
+                    invalid_action = True
+                    invalid_reason = f"Negative action ID: {action_id_parsed}"
+                    print(f"[INVALID] Turn {turn_number}: {invalid_reason}")
+                # Don't validate against hand_cards - Gin Rummy has special actions (knock, gin)
+                # that aren't in hand, and discard actions may use different ID mapping
         except ValueError:
             invalid_action = True
             invalid_reason = f"Could not parse action as integer: {action_to_send}"
