@@ -1,10 +1,191 @@
 import os
 import re
 import random
+import json
 import requests
+import numpy as np
+from collections import deque, defaultdict
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Semaphore
 from trl.experimental.openenv import generate_rollout_completions
+
+
+# ============================================================
+# Module-Level Constants (shared across all rollout functions)
+# ============================================================
+
+GAMES_TO_TASK_ID_RANGE = {
+    "goofspiel": (0, 99999999),
+    "liars_dice": (100000000, 199999999),
+    "leduc_poker": (200000000, 299999999),
+    "gin_rummy": (300000000, 399999999),
+    "othello": (400000000, 499999999),
+    "backgammon": (500000000, 599999999),
+    "hex": (600000000, 699999999),
+    "clobber": (700000000, 799999999),
+}
+
+# Games where strategy forcing is supported
+GAMES_WITH_STRATEGY_FORCING = {"gin_rummy"}
+
+# Per-game system prompts
+# NOTE: Server already sends full game rules via agent.get_rules() in /reset observation.
+# System prompts only need output format instructions — do NOT duplicate rules here.
+GAME_SYSTEM_PROMPTS = {
+    "gin_rummy": (
+        "You are playing Gin Rummy.\n\n"
+        "# Output Format\n"
+        "You must respond with ONLY the action ID (a single number).\n"
+        "Do NOT include descriptions or explanations.\n\n"
+        "Examples:\n"
+        '- For action "52 -> Draw upcard": respond "52"\n'
+        '- For action "53 -> Draw stock": respond "53"\n'
+        '- For action "5 -> discard": respond "5"'
+    ),
+    "goofspiel": (
+        "You are playing Goofspiel (Game of Pure Strategy).\n\n"
+        "# Output Format\n"
+        "You must respond with ONLY the action ID (a single number).\n"
+        "Do NOT include descriptions or explanations.\n\n"
+        "Examples:\n"
+        '- For action "0 -> bid card 1": respond "0"\n'
+        '- For action "7 -> bid card 8": respond "7"'
+    ),
+    "liars_dice": (
+        "You are playing Liar's Dice.\n\n"
+        "# Output Format\n"
+        "You must respond with ONLY the action ID (a single number).\n"
+        "Do NOT include descriptions or explanations.\n\n"
+        "Examples:\n"
+        '- For action "0 -> 1-1" (bid 1 die showing 1): respond "0"\n'
+        '- For action "29 -> Liar": respond "29"'
+    ),
+    "leduc_poker": (
+        "You are playing Leduc Poker.\n\n"
+        "# Output Format\n"
+        "You must respond with ONLY the action ID (a single number).\n"
+        "Do NOT include descriptions or explanations.\n\n"
+        "Examples:\n"
+        '- For action "0 -> Fold": respond "0"\n'
+        '- For action "1 -> Call": respond "1"\n'
+        '- For action "2 -> Raise": respond "2"'
+    ),
+    "othello": (
+        "You are playing Othello (Reversi).\n\n"
+        "# Output Format\n"
+        "You must respond with ONLY the action ID (a single number).\n"
+        "Do NOT include descriptions or explanations.\n\n"
+        "Examples:\n"
+        '- For action "19 -> d4": respond "19"\n'
+        '- For action "37 -> f5": respond "37"'
+    ),
+    "backgammon": (
+        "You are playing Backgammon.\n\n"
+        "# Output Format\n"
+        "You must respond with ONLY the action ID (a single number).\n"
+        "Do NOT include descriptions or explanations.\n\n"
+        "Examples:\n"
+        '- For action "0 -> 8/5/3": respond "0"\n'
+        '- For action "12 -> 6/3": respond "12"'
+    ),
+    "hex": (
+        "You are playing Hex.\n\n"
+        "# Output Format\n"
+        "You must respond with ONLY the action ID (a single number).\n"
+        "Do NOT include descriptions or explanations.\n\n"
+        "Examples:\n"
+        '- For action "0 -> a1": respond "0"\n'
+        '- For action "12 -> c3": respond "12"'
+    ),
+    "clobber": (
+        "You are playing Clobber.\n\n"
+        "# Output Format\n"
+        "You must respond with ONLY the action ID (a single number).\n"
+        "Do NOT include descriptions or explanations.\n\n"
+        "Examples:\n"
+        '- For action "0 -> 0 0": respond "0"\n'
+        '- For action "5 -> 2 3": respond "5"'
+    ),
+}
+
+# Fallback prompt for games without a specific prompt
+DEFAULT_SYSTEM_PROMPT = (
+    "You are playing a strategic game.\n\n"
+    "# Output Format\n"
+    "You must respond with ONLY the action ID (a single number).\n"
+    "Do NOT include descriptions or explanations.\n\n"
+    "Choose from the legal actions provided. Respond with just the ID number."
+)
+
+# Per-game strategy hints (aligned with agent get_rules() and game mechanics)
+GAME_STRATEGY_HINTS = {
+    "gin_rummy": (
+        "\n\n# Strategy Tips\n"
+        "- Draw phase: Use 52 for upcard, 53 for stock pile\n"
+        "- Build melds: sets (3+ same rank) and runs (3+ consecutive same suit)\n"
+        "- Track opponent discards to avoid feeding their melds\n"
+        "- Knock when deadwood \u2264 knock_card value (check game variant)\n"
+        "- Gin (0 deadwood) = 25-point bonus"
+    ),
+    "goofspiel": (
+        "\n\n# Strategy Tips\n"
+        "- Save high bid cards for high prize cards\n"
+        "- If bids tie, prize is discarded (no one gets points)\n"
+        "- Consider what opponent might bid based on prizes won so far\n"
+        "- Track remaining bid cards for both players"
+    ),
+    "liars_dice": (
+        "\n\n# Strategy Tips\n"
+        "- 6s are WILD: count as ANY face value in all bids\n"
+        "- Bid based on your own dice + expected opponent dice\n"
+        "- Higher bid = same face higher quantity, OR same quantity higher face\n"
+        "- Call Liar when bid exceeds realistic total dice count"
+    ),
+    "leduc_poker": (
+        "\n\n# Strategy Tips\n"
+        "- Hand ranking: Pair (private+public match) > High card (K>Q>J)\n"
+        "- Round 1 raise = 2 chips, Round 2 raise = 4 chips\n"
+        "- Max 2 raises per round\n"
+        "- Raise with K, consider folding J vs opponent raise"
+    ),
+    "othello": (
+        "\n\n# Strategy Tips\n"
+        "- Corners cannot be flipped — prioritize capturing them\n"
+        "- Avoid placing on edges adjacent to empty corners\n"
+        "- Flank opponent discs horizontally, vertically, or diagonally\n"
+        "- Must flip at least 1 disc; if no valid move, pass"
+    ),
+    "backgammon": (
+        "\n\n# Strategy Tips\n"
+        "- x = your checkers, o = opponent's checkers\n"
+        "- Avoid leaving blots (single checkers) exposed to hits\n"
+        "- Make points (2+ checkers) to block opponent movement\n"
+        "- Bar checkers must re-enter before other moves\n"
+        "- Bear off efficiently once all checkers are in home board"
+    ),
+    "hex": (
+        "\n\n# Strategy Tips\n"
+        "- Red (x) connects top-left to bottom-right\n"
+        "- Blue (o) connects top-right to bottom-left\n"
+        "- Control center for flexible connections\n"
+        "- No draws possible — someone must win"
+    ),
+    "clobber": (
+        "\n\n# Strategy Tips\n"
+        "- Every move MUST capture an adjacent opponent piece\n"
+        "- Keep your pieces connected to maintain move options\n"
+        "- Isolate opponent pieces so they run out of captures\n"
+        "- Player with no legal moves loses"
+    ),
+}
+
+DEFAULT_STRATEGY_HINTS = (
+    "\n\n# Strategy Tips\n"
+    "- Think carefully about the game state before choosing\n"
+    "- Consider your opponent's likely moves\n"
+    "- Try to maximize your score while minimizing risk"
+)
 
 
 def extract_and_format_observation(obs_text):
@@ -157,18 +338,87 @@ def remove_reasoning_tags(text: str) -> str:
     return cleaned.strip()
 
 
+class FailureBuffer:
+    """
+    Replay buffer for failed/low-scoring tasks.
+    Prioritizes difficult tasks for more practice.
+    """
+    
+    def __init__(self, max_size: int = 500):
+        self.max_size = max_size
+        self.buffer = deque(maxlen=max_size)
+        self.task_stats = defaultdict(lambda: {"attempts": 0, "successes": 0})
+    
+    def add(self, task_id: int, score: float, success: bool):
+        """Add task result to buffer if failed or low score."""
+        self.task_stats[task_id]["attempts"] += 1
+        if success:
+            self.task_stats[task_id]["successes"] += 1
+        
+        if not success or score < 0.5:
+            self.buffer.append({
+                "task_id": task_id,
+                "score": score,
+                "priority": 1.0 - score,
+            })
+    
+    def sample(self, k: int = 1) -> list[int]:
+        """Sample task IDs with priority weighting."""
+        if not self.buffer:
+            return []
+        
+        priorities = np.array([item["priority"] for item in self.buffer])
+        total = priorities.sum()
+        if total == 0:
+            return []
+        probs = priorities / total
+        
+        indices = np.random.choice(
+            len(self.buffer),
+            size=min(k, len(self.buffer)),
+            replace=False,
+            p=probs
+        )
+        
+        return [self.buffer[i]["task_id"] for i in indices]
+    
+    def get_stats(self) -> dict:
+        """Get buffer statistics."""
+        total_attempts = sum(s["attempts"] for s in self.task_stats.values())
+        total_successes = sum(s["successes"] for s in self.task_stats.values())
+        return {
+            "buffer_size": len(self.buffer),
+            "unique_tasks": len(self.task_stats),
+            "total_attempts": total_attempts,
+            "success_rate": total_successes / total_attempts if total_attempts > 0 else 0.0,
+        }
+
+
 class CurriculumScheduler:
     """
     Manages curriculum learning parameters throughout training.
+    
+    Features:
+    - Turn-count curriculum (max_turn increases gradually)
+    - Hint probability decay
+    - Performance gating (won't advance if win rate too low)
+    - Failure replay buffer (prioritizes difficult tasks)
+    - Checkpoint persistence (save/load state)
     """
     def __init__(
         self,
-        initial_max_turn=3,
-        final_max_turn=50,  # Gin Rummy: Typical game is 30-50 turns
+        initial_max_turn=10,
+        final_max_turn=50,
         rollouts_per_stage=1280,
-        initial_hint_prob=0.50,  # Lower hint probability for complex game
+        initial_hint_prob=0.50,
         final_hint_prob=0.0,
         warmup_rollouts=128,
+        # Performance gating parameters
+        progression_threshold=0.7,
+        eval_window=100,
+        # Failure replay parameters
+        failure_buffer_size=500,
+        failure_replay_prob=0.3,
     ):
         self.initial_max_turn = initial_max_turn
         self.final_max_turn = final_max_turn
@@ -179,19 +429,40 @@ class CurriculumScheduler:
         
         self.total_rollouts = 0
         
+        # Performance gating
+        self.progression_threshold = progression_threshold
+        self.eval_window = eval_window
+        self.recent_results = deque(maxlen=eval_window)
+        self._max_achieved_stage = 0  # Highest stage reached by rollout count
+        self._gated_stage = 0         # Actual stage (gated by performance)
+        
+        # Failure replay buffer
+        self.failure_buffer = FailureBuffer(max_size=failure_buffer_size)
+        self.failure_replay_prob = failure_replay_prob
+        
     def get_max_turn(self):
-        """Calculate current max_turn based on curriculum."""
+        """Calculate current max_turn based on curriculum + performance gating."""
         if self.total_rollouts < self.warmup_rollouts:
-            # During warmup, use initial max_turn
             return self.initial_max_turn
         
-        # Calculate stage (which batch of rollouts_per_stage we're in)
+        # Calculate stage by rollout count (time-based)
         adjusted_rollouts = self.total_rollouts - self.warmup_rollouts
-        stage = adjusted_rollouts // self.rollouts_per_stage
+        time_stage = adjusted_rollouts // self.rollouts_per_stage
+        self._max_achieved_stage = time_stage
         
-        # Linearly increase max_turn
+        # Performance gating: only advance if win rate >= threshold
+        if len(self.recent_results) >= self.eval_window // 2:
+            win_rate = sum(self.recent_results) / len(self.recent_results)
+            if win_rate >= self.progression_threshold:
+                # Allow advancement up to time_stage
+                self._gated_stage = min(time_stage, self._gated_stage + 1)
+            # else: keep current _gated_stage (don't advance)
+        else:
+            # Not enough data yet, follow time-based schedule
+            self._gated_stage = time_stage
+        
         current_max_turn = min(
-            self.initial_max_turn + stage,
+            self.initial_max_turn + self._gated_stage,
             self.final_max_turn
         )
         return current_max_turn
@@ -199,11 +470,8 @@ class CurriculumScheduler:
     def get_hint_prob(self):
         """Calculate current hint probability based on curriculum."""
         if self.total_rollouts < self.warmup_rollouts:
-            # During warmup, always hint
             return self.initial_hint_prob
         
-        # Linearly decay from initial to final over training
-        # Decay over the course of reaching final_max_turn
         total_stages = self.final_max_turn - self.initial_max_turn
         total_decay_rollouts = total_stages * self.rollouts_per_stage
         
@@ -213,17 +481,59 @@ class CurriculumScheduler:
         current_prob = self.initial_hint_prob - progress * (self.initial_hint_prob - self.final_hint_prob)
         return max(current_prob, self.final_hint_prob)
     
+    def update(self, task_id: int, score: float, success: bool):
+        """
+        Update curriculum with episode result.
+        Feeds into performance gating and failure replay buffer.
+        """
+        self.recent_results.append(success)
+        self.failure_buffer.add(task_id, score, success)
+    
+    def should_replay_failure(self) -> bool:
+        """Check if this episode should be a failure replay."""
+        return (random.random() < self.failure_replay_prob 
+                and len(self.failure_buffer.buffer) > 0)
+    
+    def sample_failure_task(self) -> int | None:
+        """Sample a task_id from the failure buffer."""
+        tasks = self.failure_buffer.sample(k=1)
+        return tasks[0] if tasks else None
+    
     def step(self, num_rollouts=1):
         """Increment rollout counter."""
         self.total_rollouts += num_rollouts
         
     def get_status(self):
         """Get current curriculum status for logging."""
+        win_rate = sum(self.recent_results) / len(self.recent_results) if self.recent_results else 0.0
         return {
             "total_rollouts": self.total_rollouts,
             "max_turn": self.get_max_turn(),
             "hint_prob": self.get_hint_prob(),
+            "win_rate": win_rate,
+            "gated_stage": self._gated_stage,
+            "time_stage": self._max_achieved_stage,
+            "failure_buffer_size": len(self.failure_buffer.buffer),
         }
+    
+    def get_state(self) -> dict:
+        """Get state for checkpointing."""
+        return {
+            "total_rollouts": self.total_rollouts,
+            "gated_stage": self._gated_stage,
+            "max_achieved_stage": self._max_achieved_stage,
+            "recent_results": list(self.recent_results),
+            "failure_buffer_stats": self.failure_buffer.get_stats(),
+        }
+    
+    def load_state(self, state: dict):
+        """Load state from checkpoint."""
+        self.total_rollouts = state.get("total_rollouts", 0)
+        self._gated_stage = state.get("gated_stage", 0)
+        self._max_achieved_stage = state.get("max_achieved_stage", 0)
+        recent = state.get("recent_results", [])
+        self.recent_results.clear()
+        self.recent_results.extend(recent)
 
 
 def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: int = 30) -> dict[str, list]:
@@ -233,18 +543,9 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
     import requests
     import json
 
-    games_to_task_id_range = {
-        "goofspiel": (0, 99999999),
-        "liars_dice": (100000000, 199999999),
-        "leduc_poker": (200000000, 299999999),
-        "gin_rummy": (300000000, 399999999),
-        "othello": (400000000, 499999999),
-        "backgammon": (500000000, 599999999),
-        "hex": (600000000, 699999999),
-        "clobber": (700000000, 799999999),
-    }
+    games_to_task_id_range = GAMES_TO_TASK_ID_RANGE
 
-    selected_game = "gin_rummy"
+    selected_game = getattr(trainer.args, "selected_game", "gin_rummy")
     
     # --- 1. Static Initialization (Once per Rank) ---
     # We check if the function has already established a connection for this worker
@@ -270,7 +571,7 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
         # Create environment (POST /create) - ONLY ONCE
         try:
             print(f"Initializing environment on rank {rank} at {base_url}...")
-            payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
+            payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts"}
             create_res = requests.post(f"{base_url}/reset", json=payload, timeout=300)
             create_res.raise_for_status()
             rollout_first_prompt_and_completion.initialized = True
@@ -305,7 +606,7 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
         turn_number = 0
         
         # --- Reset Environment (POST /reset) ---
-        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
+        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts"}
         
         try:
             reset_res = requests.post(f"{env_endpoint}/reset", json=payload, timeout=TIMEOUT)
@@ -415,18 +716,9 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
     STRATEGY_REWARD = 1.0
     INVALID_PENALTY = -0.1
     
-    games_to_task_id_range = {
-        "goofspiel": (0, 99999999),
-        "liars_dice": (100000000, 199999999),
-        "leduc_poker": (200000000, 299999999),
-        "gin_rummy": (300000000, 399999999),
-        "othello": (400000000, 499999999),
-        "backgammon": (500000000, 599999999),
-        "hex": (600000000, 699999999),
-        "clobber": (700000000, 799999999),
-    }
+    games_to_task_id_range = GAMES_TO_TASK_ID_RANGE
 
-    selected_game = "gin_rummy"
+    selected_game = getattr(trainer.args, "selected_game", "gin_rummy")
 
     # --- 1. Static Initialization (Once per Rank) ---
     if not getattr(rollout_last_prompt_and_completion_parallelized_curriculum, "initialized", False):
@@ -443,7 +735,7 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
             try:
                 print(f"[INIT] Initializing env on server {idx}: {base_url}")
                 # Initialize with a test reset to ensure server is ready
-                payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
+                payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts"}
                 res = requests.post(f"{base_url}/reset", json=payload, timeout=300)
                 res.raise_for_status()
                 env_pool.append({"base_url": base_url})
@@ -504,7 +796,7 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
         use_hints = random.random() < current_hint_prob
 
         # --- Reset Environment (POST /reset) ---
-        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
+        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts"}
 
         try:
             reset_res = requests.post(f"{env_endpoint}/reset", json=payload, timeout=TIMEOUT)
@@ -525,57 +817,58 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
 
         # --- Build Conversation History ---
         # First make system prompt
-        system_prompt = "You are playing Gin Rummy.\n\n# Game Rules\nGIN RUMMY RULES:\nSetup: Standard 52-card deck. Each player starts with 10 cards.\nGoal: Form sets (3-4 of same rank) and runs (3+ consecutive cards of same suit) to minimize deadwood points.\n\nEach turn:\n1. Draw a card (from deck or discard pile)\n2. Discard a card to the discard pile\n3. Try to form melds (sets/runs) to reduce deadwood\n4. Knock when deadwood ≤ 10 points, or Gin when deadwood = 0\n\nScoring:\n- Gin (0 deadwood): 25 points + opponent's deadwood\n- Knock: Difference in deadwood (if you have less)\n- Undercut: Opponent wins if they have equal or less deadwood\n\nCard Values: Ace=1, 2-10=face value, Face cards=10\n\n# Output Format\nYou must respond with ONLY the action ID (a single number).\nDo NOT include descriptions or explanations.\n\nExamples:\n- For action \"0 -> draw from deck\": respond \"0\"\n- For action \"5 -> discard 7♠\": respond \"5\"\n- For action \"89 -> knock\": respond \"89\""
+        system_prompt = GAME_SYSTEM_PROMPTS.get(selected_game, DEFAULT_SYSTEM_PROMPT)
 
         # Add suggestion for playing strategy based on curriculum
         if use_hints:
-            suggestion_prompt = "\n\n# Strategy Tips\n- Early game: Draw from deck to see more cards\n- Build runs and sets to reduce deadwood\n- Track opponent's discards to guess their hand\n- Knock when you have ≤10 deadwood points and think you're ahead\n- Go for Gin (0 deadwood) when close for bonus points"
+            suggestion_prompt = GAME_STRATEGY_HINTS.get(selected_game, DEFAULT_STRATEGY_HINTS)
             system_prompt += suggestion_prompt
 
         messages = [{"role": "system", "content": system_prompt}]
 
-        # Strategy forcing for turns before target training turn
-        while not done and (turn_number < target_training_turn):
-            messages.append({"role": "user", "content": formatted_observation})
+        # Strategy forcing (only for supported games)
+        if selected_game in GAMES_WITH_STRATEGY_FORCING:
+            while not done and (turn_number < target_training_turn):
+                messages.append({"role": "user", "content": formatted_observation})
 
-            hand_cards = get_hand_cards(formatted_observation)
-            if len(hand_cards) <= 1:
-                target_training_turn = turn_number
-                break
-            
-            prize_card = extract_prize_card(formatted_observation)
-            action_id = prize_card - 1
+                hand_cards = get_hand_cards(formatted_observation)
+                if len(hand_cards) <= 1:
+                    target_training_turn = turn_number
+                    break
+                
+                prize_card = extract_prize_card(formatted_observation)
+                action_id = prize_card - 1
 
-            messages.append({"role": "assistant", "content": str(action_id)})
+                messages.append({"role": "assistant", "content": str(action_id)})
 
-            # --- Step Environment (POST /step) ---
-            try:
-                formatted_observation = ""
-                step_payload = {"action": str(action_id), "episode_id": episode_id}
-                step_res = requests.post(f"{env_endpoint}/step", json=step_payload, timeout=TIMEOUT)
-                step_res.raise_for_status()
-                step_data = step_res.json()
-                step_block = step_data["result"]
+                # --- Step Environment (POST /step) ---
+                try:
+                    formatted_observation = ""
+                    step_payload = {"action": str(action_id), "episode_id": episode_id}
+                    step_res = requests.post(f"{env_endpoint}/step", json=step_payload, timeout=TIMEOUT)
+                    step_res.raise_for_status()
+                    step_data = step_res.json()
+                    step_block = step_data["result"]
 
-                # Extract response data
-                raw_observation = step_block.get("observation", "")
-                formatted_observation = extract_and_format_observation(raw_observation)
-                step_reward = step_block.get("reward", 0)
-                done = step_block.get("done", False)
+                    # Extract response data
+                    raw_observation = step_block.get("observation", "")
+                    formatted_observation = extract_and_format_observation(raw_observation)
+                    step_reward = step_block.get("reward", 0)
+                    done = step_block.get("done", False)
 
-            except Exception as e:
-                print(f"Step failed: {e}")
-                step_reward = -0.01
-                done = False
+                except Exception as e:
+                    print(f"Step failed: {e}")
+                    step_reward = -0.01
+                    done = False
 
-            turn_number += 1
+                turn_number += 1
 
-        if done:
-            print(
-                f"[GT] Game {game_id} ended during strategy forcing phase at turn {turn_number}. "
-                f"Returning fallback."
-            )
-            return index, None
+            if done:
+                print(
+                    f"[GT] Game {game_id} ended during strategy forcing phase at turn {turn_number}. "
+                    f"Returning fallback."
+                )
+                return index, None
 
         messages.append({"role": "user", "content": formatted_observation})
 
@@ -669,13 +962,23 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
     # Update curriculum
     curriculum.step(len(prompts))
 
+    # Update curriculum with per-episode results (performance gating + failure buffer)
+    for r in results:
+        if r is not None:
+            task_id = int(prompts[results.index(r)]) if prompts else 0
+            success = r["reward"] > 0
+            curriculum.update(task_id, r["reward"], success)
+
     # Log batch stats
     valid = [r for r in results if r is not None]
     if valid:
         avg_strat = sum(1 for r in valid if r["strategy_followed"]) / len(valid)
         avg_reward = sum(r["reward"] for r in valid) / len(valid)
+        status = curriculum.get_status()
         print(
-            f"[GT-BATCH] Strategy: {avg_strat:.1%}, Avg Reward: {avg_reward:.3f}"
+            f"[GT-BATCH] Strategy: {avg_strat:.1%}, Avg Reward: {avg_reward:.3f}, "
+            f"Win Rate: {status['win_rate']:.1%}, Stage: {status['gated_stage']}/{status['time_stage']}, "
+            f"Failure Buffer: {status['failure_buffer_size']}"
         )
 
     return {
@@ -703,18 +1006,9 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
     STRATEGY_REWARD_WEIGHT = 0.5  # Weight for strategy adherence vs final score
     STEP_STRATEGY_REWARD = 0.1    # Immediate reward for following strategy at each step
 
-    games_to_task_id_range = {
-        "goofspiel": (0, 99999999),
-        "liars_dice": (100000000, 199999999),
-        "leduc_poker": (200000000, 299999999),
-        "gin_rummy": (300000000, 399999999),
-        "othello": (400000000, 499999999),
-        "backgammon": (500000000, 599999999),
-        "hex": (600000000, 699999999),
-        "clobber": (700000000, 799999999),
-    }
+    games_to_task_id_range = GAMES_TO_TASK_ID_RANGE
 
-    selected_game = "gin_rummy"
+    selected_game = getattr(trainer.args, "selected_game", "gin_rummy")
 
     # --- 1. Static Initialization (Once per Rank) ---
     if not getattr(rollout_full_prompt_and_completion_parallelized_curriculum, "initialized", False):
@@ -731,7 +1025,7 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
             try:
                 print(f"[INIT] Initializing env on server {idx}: {base_url}")
                 # Initialize with a test reset to ensure server is ready
-                payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
+                payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts"}
                 res = requests.post(f"{base_url}/reset", json=payload, timeout=300)
                 res.raise_for_status()
                 env_pool.append({"base_url": base_url})
@@ -804,7 +1098,7 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
         use_hints = random.random() < current_hint_prob
 
         # --- Reset Environment (POST /reset) ---
-        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
+        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts"}
 
         try:
             reset_res = requests.post(f"{env_endpoint}/reset", json=payload, timeout=TIMEOUT)
@@ -825,11 +1119,11 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
 
         # --- Build Conversation History ---
         # First make system prompt
-        system_prompt = "You are playing Gin Rummy.\n\n# Game Rules\nGIN RUMMY RULES:\nSetup: Standard 52-card deck. Each player starts with 10 cards.\nGoal: Form sets (3-4 of same rank) and runs (3+ consecutive cards of same suit) to minimize deadwood points.\n\nEach turn:\n1. Draw a card (from deck or discard pile)\n2. Discard a card to the discard pile\n3. Try to form melds (sets/runs) to reduce deadwood\n4. Knock when deadwood ≤ 10 points, or Gin when deadwood = 0\n\nScoring:\n- Gin (0 deadwood): 25 points + opponent's deadwood\n- Knock: Difference in deadwood (if you have less)\n- Undercut: Opponent wins if they have equal or less deadwood\n\nCard Values: Ace=1, 2-10=face value, Face cards=10\n\n# Output Format\nYou must respond with ONLY the action ID (a single number).\nDo NOT include descriptions or explanations.\n\nExamples:\n- For action \"0 -> draw from deck\": respond \"0\"\n- For action \"5 -> discard 7♠\": respond \"5\"\n- For action \"89 -> knock\": respond \"89\""
+        system_prompt = GAME_SYSTEM_PROMPTS.get(selected_game, DEFAULT_SYSTEM_PROMPT)
 
         # Add suggestion for playing strategy based on curriculum
         if use_hints:
-            suggestion_prompt = "\n\n# Strategy Tips\n- Early game: Draw from deck to see more cards\n- Build runs and sets to reduce deadwood\n- Track opponent's discards to guess their hand\n- Knock when you have ≤10 deadwood points and think you're ahead\n- Go for Gin (0 deadwood) when close for bonus points"
+            suggestion_prompt = GAME_STRATEGY_HINTS.get(selected_game, DEFAULT_STRATEGY_HINTS)
             system_prompt += suggestion_prompt
 
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": formatted_observation}]
@@ -892,7 +1186,6 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
             # Parse ReAct format
             if "Action:" in action_to_send:
                 action_to_send = action_to_send.split("Action:")[-1].strip()
-            step_rewards.append(0.0)
 
             # --- Step Environment (POST /step) ---
             try:
@@ -918,6 +1211,9 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
             # Check for invalid actions in observation
             if "Nothing happens" in formatted_observation or "Invalid" in formatted_observation:
                 invalid_count += 1
+                step_rewards.append(-0.05)  # Penalty for invalid action
+            else:
+                step_rewards.append(0.02)   # Small reward for valid action
 
             if done:
                 train_reward = step_reward
@@ -939,16 +1235,20 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
         # Combine immediate step rewards
         immediate_rewards = sum(step_rewards)
         
+        # If game didn't finish (no terminal reward), give partial credit for progress
+        if not done and train_reward == 0.0:
+            # Partial reward based on how far we got without invalid actions
+            valid_ratio = max(0, turn_number - invalid_count) / max(turn_number, 1)
+            train_reward = 0.1 * valid_ratio  # Small positive for playing validly
+        
         # Use final game score as the primary reward
         shaped_reward = train_reward + immediate_rewards
         
         # Apply invalid action penalty
         shaped_reward = shaped_reward - 0.05 * float(invalid_count)
 
-        # Log in one line
-        print("============")
-        print(f"id: {game_id}, max_turn: {current_max_turn}, hints: {use_hints}, final_score: {train_reward:.3f}, reward: {shaped_reward:.3f}")
-        print("============")
+        # Log
+        print(f"[FULL] id={game_id}, turns={turn_number}/{current_max_turn}, invalids={invalid_count}, done={done}, score={train_reward:.3f}, reward={shaped_reward:.3f}")
 
         return index, {
             "prompt_ids": episode_prompt_ids,
@@ -988,12 +1288,24 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
     # Update curriculum after batch
     curriculum.step(len(prompts))
 
+    # Update curriculum with per-episode results (performance gating + failure buffer)
+    for i, r in enumerate(results):
+        if r is not None and r.get("final_score") is not None:
+            task_id = int(prompts[i]) if i < len(prompts) else 0
+            success = r["final_score"] > 0
+            curriculum.update(task_id, r["final_score"], success)
+
     list_results = [r for r in results if r is not None]
     
-    # Log batch statistics
+    # Log batch statistics with curriculum info
     avg_strategy = sum(r["strategy_ratio"] for r in list_results) / len(list_results) if list_results else 0
     avg_final = sum(r["final_score"] for r in list_results) / len(list_results) if list_results else 0
-    print(f"[BATCH] Avg Strategy Adherence: {avg_strategy:.2%}, Avg Final Score: {avg_final:.3f}")
+    status = curriculum.get_status()
+    print(
+        f"[BATCH] Avg Strategy: {avg_strategy:.2%}, Avg Score: {avg_final:.3f}, "
+        f"Win Rate: {status['win_rate']:.1%}, Stage: {status['gated_stage']}/{status['time_stage']}, "
+        f"Failure Buffer: {status['failure_buffer_size']}"
+    )
 
     # ---- Aggregate ----
     return {

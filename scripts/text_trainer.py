@@ -107,6 +107,8 @@ def is_openai_model(model_name: str) -> bool:
 
 OOM_ERROR = "torch.OutOfMemoryError: CUDA out of memory"
 VLLM_OOM_ERROR = "ValueError: No available memory for the cache blocks"
+SHARED_MEMORY_ERROR = "Error while creating shared memory segment"
+KV_CACHE_ERROR = "ValueError: To serve at least one request with the models's max seq len"
 
 
 def get_error_type(log_path: str):
@@ -116,6 +118,10 @@ def get_error_type(log_path: str):
         return OOM_ERROR
     elif VLLM_OOM_ERROR in text:
         return VLLM_OOM_ERROR
+    elif SHARED_MEMORY_ERROR in text:
+        return SHARED_MEMORY_ERROR
+    elif KV_CACHE_ERROR in text:
+        return KV_CACHE_ERROR
     else:
         return None
 
@@ -461,6 +467,8 @@ def main():
         c_train_info = copy.deepcopy(train_info)
         final_output_dir = None
         if args.task_type == TaskType.GRPOTASK.value or args.task_type == TaskType.ENVIRONMENTTASK.value:
+            if state.get("mode") == "finish":
+                break
             state["mode"] = "finish" # do not run this for GRPO task
             c_train_info["train_request"]["checking_mode"] = "none"
         else:

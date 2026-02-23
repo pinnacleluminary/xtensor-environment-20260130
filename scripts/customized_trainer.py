@@ -173,25 +173,18 @@ class CustomEvalSaveCallback(TrainerCallback):
             
         when_to_eval = self.function_when_to_evaluate(state.global_step)
         if when_to_eval["eval"]:
-            if args.do_eval:        
-                # do not allow the pod to be stopped by any reason 
-                    # first check if there is at least one checkpoint or not 
-                print(f"Evaluating the model at step: {state.global_step} the reason: {when_to_eval['reason']}", flush=True)
-                control.should_evaluate = True
-                control.should_save = True
-            else:
-                # Only save the model, do not evaluate
-                control.should_evaluate = False
-                control.should_save = True
-                self.save_only = True
+            # do not allow the pod to be stopped by any reason 
+                # first check if there is at least one checkpoint or not 
+            print(f"Evaluating the model at step: {state.global_step} the reason: {when_to_eval['reason']}", flush=True)
+            control.should_evaluate = True
+            control.should_save = True
             if when_to_eval["reason"] == "end_time":
+                control.should_training_stop = True
+                print(f"Stopping training at step: {state.global_step} because of end_time", flush=True)
                 if not self.has_checkpoint: # if there is no checkpoint, we just save the model, do not evaluate
                     print(f"No checkpoint found, just save the model at step: {state.global_step}", flush=True)
                     control.should_evaluate = False
-                    control.should_training_stop = True
                     self.save_only = True
-                
-            
         return control
 
 
@@ -271,14 +264,25 @@ class CustomEvalSaveCallback(TrainerCallback):
 class GRPOCustomEvalSaveCallback(CustomEvalSaveCallback):
     def compute_loss(self, state: TrainerState, metrics):
         eval_loss = None
-        if state.log_history:
+        
+        # Priority 1: Check metrics directly (standard HuggingFace behavior)
+        if metrics and "eval_reward" in metrics:
+            eval_loss = metrics["eval_reward"]
+            print(f"customized_trainer.py: Found eval_reward in metrics: {eval_loss}", flush=True)
+            
+        # Priority 2: Check log history (fallback)
+        if eval_loss is None and state.log_history:
             last_log_entry = state.log_history[-1]
             eval_loss = last_log_entry.get("eval_reward", None)
-            print(f"choose eval_loss ({eval_loss}) as eval_reward from: last_log_entry: {last_log_entry}; \n metrics: {metrics}", flush=True)
-        else:
-            print(f"state.log_history is empty", flush=True)
-            
+            if eval_loss is not None:
+                print(f"customized_trainer.py: Found eval_reward in last_log_entry: {eval_loss}", flush=True)
+        
+        if eval_loss is None: 
+            print(f"customized_trainer.py: eval_reward not found in metrics or log_history. Metrics keys: {list(metrics.keys()) if metrics else 'None'}", flush=True)
+
         if eval_loss is not None:
+            # Negate reward because Trainer minimizes loss
+            # maximize reward => minimize -reward
             eval_loss = - eval_loss
             
         return eval_loss

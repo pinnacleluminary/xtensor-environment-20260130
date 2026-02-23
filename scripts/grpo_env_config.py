@@ -12,6 +12,119 @@ from copy import deepcopy
 from lrs_lookup import get_grpo_lr
 allow_find_lk_lr = False
 
+ENVIRONMENT_CONFIG = {
+    "goofspiel": {
+         "0_1_b": {"initial_max_turn": 3,"rollouts_per_stage": 1600},
+         "1_2_b": {"initial_max_turn": 3,"rollouts_per_stage": 1600},
+         "2_4_b": {"initial_max_turn": 3,"rollouts_per_stage": 1600},
+         "4_5_b": {"initial_max_turn": 3,"rollouts_per_stage": 1600},
+         "5_6_b": {"initial_max_turn": 3,"rollouts_per_stage": 1600},
+         "6_9_b": {"initial_max_turn": 3,"rollouts_per_stage": 1600},
+         "9_12_b": {"initial_max_turn": 3,"rollouts_per_stage": 1600},
+         "12_15_b": {"initial_max_turn": 3,"rollouts_per_stage": 1600},
+         "15_20_b": {"initial_max_turn": 3,"rollouts_per_stage": 1600},
+         "20_40_b": {"initial_max_turn": 3,"rollouts_per_stage": 1600},
+         "40_80_b": {"initial_max_turn": 3,"rollouts_per_stage": 1600},
+    },
+    "gin_rummy": {
+         "0_1_b": {"initial_max_turn": 10,"rollouts_per_stage": 1280},
+         "1_2_b": {"initial_max_turn": 10,"rollouts_per_stage": 1280},
+         "2_4_b": {"initial_max_turn": 10,"rollouts_per_stage": 1280},
+         "4_5_b": {"initial_max_turn": 10,"rollouts_per_stage": 1280},
+         "5_6_b": {"initial_max_turn": 10,"rollouts_per_stage": 1280},
+         "6_9_b": {"initial_max_turn": 10,"rollouts_per_stage": 1024},
+         "9_12_b": {"initial_max_turn": 10,"rollouts_per_stage": 1024},
+         "12_15_b": {"initial_max_turn": 10,"rollouts_per_stage": 1024},
+         "15_20_b": {"initial_max_turn": 10,"rollouts_per_stage": 1024},
+         "20_40_b": {"initial_max_turn": 10,"rollouts_per_stage": 1024},
+         "40_80_b": {"initial_max_turn": 10,"rollouts_per_stage": 1024},
+    },
+    # Liar's Dice: Short bluffing game (5-10 moves avg, 1.1k tokens)
+    "liars_dice": {
+         "0_1_b":  {"initial_max_turn": 5, "rollouts_per_stage": 1600},
+         "1_2_b":  {"initial_max_turn": 5, "rollouts_per_stage": 1600},
+         "2_4_b":  {"initial_max_turn": 5, "rollouts_per_stage": 1600},
+         "4_5_b":  {"initial_max_turn": 5, "rollouts_per_stage": 1600},
+         "5_6_b":  {"initial_max_turn": 5, "rollouts_per_stage": 1600},
+         "6_9_b":  {"initial_max_turn": 5, "rollouts_per_stage": 1600},
+         "9_12_b": {"initial_max_turn": 5, "rollouts_per_stage": 1600},
+         "12_15_b":{"initial_max_turn": 5, "rollouts_per_stage": 1600},
+         "15_20_b":{"initial_max_turn": 5, "rollouts_per_stage": 1600},
+         "20_40_b":{"initial_max_turn": 5, "rollouts_per_stage": 1600},
+         "40_80_b":{"initial_max_turn": 5, "rollouts_per_stage": 1600},
+    },
+    # Leduc Poker: Very short game (4-8 moves, 1.3k tokens)
+    "leduc_poker": {
+         "0_1_b":  {"initial_max_turn": 4, "rollouts_per_stage": 1600},
+         "1_2_b":  {"initial_max_turn": 4, "rollouts_per_stage": 1600},
+         "2_4_b":  {"initial_max_turn": 4, "rollouts_per_stage": 1600},
+         "4_5_b":  {"initial_max_turn": 4, "rollouts_per_stage": 1600},
+         "5_6_b":  {"initial_max_turn": 4, "rollouts_per_stage": 1600},
+         "6_9_b":  {"initial_max_turn": 4, "rollouts_per_stage": 1600},
+         "9_12_b": {"initial_max_turn": 4, "rollouts_per_stage": 1600},
+         "12_15_b":{"initial_max_turn": 4, "rollouts_per_stage": 1600},
+         "15_20_b":{"initial_max_turn": 4, "rollouts_per_stage": 1600},
+         "20_40_b":{"initial_max_turn": 4, "rollouts_per_stage": 1600},
+         "40_80_b":{"initial_max_turn": 4, "rollouts_per_stage": 1600},
+    },
+    # Othello: Medium-long board game (up to ~60 moves, 105k tokens)
+    "othello": {
+         "0_1_b":  {"initial_max_turn": 10, "rollouts_per_stage": 1280},
+         "1_2_b":  {"initial_max_turn": 10, "rollouts_per_stage": 1280},
+         "2_4_b":  {"initial_max_turn": 10, "rollouts_per_stage": 1280},
+         "4_5_b":  {"initial_max_turn": 10, "rollouts_per_stage": 1280},
+         "5_6_b":  {"initial_max_turn": 10, "rollouts_per_stage": 1280},
+         "6_9_b":  {"initial_max_turn": 10, "rollouts_per_stage": 1024},
+         "9_12_b": {"initial_max_turn": 10, "rollouts_per_stage": 1024},
+         "12_15_b":{"initial_max_turn": 10, "rollouts_per_stage": 1024},
+         "15_20_b":{"initial_max_turn": 10, "rollouts_per_stage": 1024},
+         "20_40_b":{"initial_max_turn": 10, "rollouts_per_stage": 1024},
+         "40_80_b":{"initial_max_turn": 10, "rollouts_per_stage": 1024},
+    },
+    # Backgammon: Long game with dice randomness (347k tokens)
+    "backgammon": {
+         "0_1_b":  {"initial_max_turn": 10, "rollouts_per_stage": 1024},
+         "1_2_b":  {"initial_max_turn": 10, "rollouts_per_stage": 1024},
+         "2_4_b":  {"initial_max_turn": 10, "rollouts_per_stage": 1024},
+         "4_5_b":  {"initial_max_turn": 10, "rollouts_per_stage": 1024},
+         "5_6_b":  {"initial_max_turn": 10, "rollouts_per_stage": 1024},
+         "6_9_b":  {"initial_max_turn": 10, "rollouts_per_stage": 768},
+         "9_12_b": {"initial_max_turn": 10, "rollouts_per_stage": 768},
+         "12_15_b":{"initial_max_turn": 10, "rollouts_per_stage": 768},
+         "15_20_b":{"initial_max_turn": 10, "rollouts_per_stage": 768},
+         "20_40_b":{"initial_max_turn": 10, "rollouts_per_stage": 768},
+         "40_80_b":{"initial_max_turn": 10, "rollouts_per_stage": 768},
+    },
+    # Hex: Medium connection game (13.9k tokens, board 5-11)
+    "hex": {
+         "0_1_b":  {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "1_2_b":  {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "2_4_b":  {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "4_5_b":  {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "5_6_b":  {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "6_9_b":  {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "9_12_b": {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "12_15_b":{"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "15_20_b":{"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "20_40_b":{"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "40_80_b":{"initial_max_turn": 8, "rollouts_per_stage": 1600},
+    },
+    # Clobber: Medium tactical game (16.9k tokens, board 5-7)
+    "clobber": {
+         "0_1_b":  {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "1_2_b":  {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "2_4_b":  {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "4_5_b":  {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "5_6_b":  {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "6_9_b":  {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "9_12_b": {"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "12_15_b":{"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "15_20_b":{"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "20_40_b":{"initial_max_turn": 8, "rollouts_per_stage": 1600},
+         "40_80_b":{"initial_max_turn": 8, "rollouts_per_stage": 1600},
+    },
+}
+
 GRPO_CONFIG = {
     "0_1_b": {
         "lr": 3e-5,
@@ -22,28 +135,25 @@ GRPO_CONFIG = {
         "vllm_gpu_memory_utilization": 0.4,
         "use_lora": True,
         "beta": 0.02,
-        "num_generations": 4,
-        "initial_max_turn": 1,
-        "rollouts_per_stage": 1600,
+        "num_generations": 4
     },
     "1_2_b": {
         "lr": 8e-6,
         "distributed": "ddp",
         "gpu_count": 1,
-        "batch_size": 2,
+        "batch_size": 3,
         "gradient_accumulation_steps": 12,
         "vllm_gpu_memory_utilization": 0.4,
         "beta": 0.04,
-        "num_generations": 4,
-        "rollouts_per_stage": 1280,
+        "num_generations": 4
     },
     "2_4_b": {
         "lr": 8e-6,
         "distributed": "ddp",
         "gpu_count": 2,
-        "batch_size": 1,
+        "batch_size": 2,
         "gradient_accumulation_steps": 8,
-        "vllm_gpu_memory_utilization": 0.3,
+        "vllm_gpu_memory_utilization": 0.4,
         "use_lora": True,
         "beta": 0.01,
         "num_generations": 4,
@@ -52,7 +162,7 @@ GRPO_CONFIG = {
         "lr": 6e-6,
         "distributed": "ddp",
         "gpu_count": 2,
-        "batch_size": 1,
+        "batch_size": 2,
         "gradient_accumulation_steps": 8,
         "use_lora": True,
         "vllm_gpu_memory_utilization": 0.4,
@@ -62,7 +172,7 @@ GRPO_CONFIG = {
         "lr": 6e-6,
         "distributed": "ddp",
         "gpu_count": 2,
-        "batch_size": 1,
+        "batch_size": 2,
         "gradient_accumulation_steps": 8,
         "use_lora": True,
         "vllm_gpu_memory_utilization": 0.4,
@@ -72,12 +182,11 @@ GRPO_CONFIG = {
         "lr": 6e-6,
         "distributed": "ddp",
         "gpu_count": 4,
-        "batch_size": 1,
+        "batch_size": 2,
         "gradient_accumulation_steps": 4,
         "use_lora": True,
         "vllm_gpu_memory_utilization": 0.5,
-        "beta": 0.01,
-        "rollouts_per_stage": 768,
+        "beta": 0.01
     },
     "9_12_b": {
         "lr": 6e-6,
@@ -182,7 +291,6 @@ def get_run_cmd(config: dict, gpu_nums: int):
         "disable_fa",
         "disable_action_mask",
         "beta",
-        "environment_name",
     ]
     for key in required_keys:
         if key not in config:
@@ -200,7 +308,6 @@ def get_run_cmd(config: dict, gpu_nums: int):
         start_cmd
         + """ train_grpo_env.py \
     --request_path {request_path} \
-    --environment_name {environment_name} \
     --bf16 True \
     --report_to wandb \
     --output_dir /workspace/data/trained_model \
@@ -226,8 +333,8 @@ def get_run_cmd(config: dict, gpu_nums: int):
     --beta {beta} \
     --num_generations {num_generations} \
     --loss_type dr_grpo \
-    --steps_per_generation 8 \
-    --do_eval False"""
+    --do_eval True \
+    --vllm_max_model_length 4225"""
     )
 
     if config.get("use_lora", False):
@@ -255,12 +362,12 @@ def get_run_cmd(config: dict, gpu_nums: int):
             + " --load_in_4bit True --use_bnb_nested_quant True --bnb_4bit_quant_type nf4"
         )
 
-    if config.get("initial_max_turn", 2) != 2:
-        template = template + f" --initial_max_turn {config.get('initial_max_turn', 2)}"
+    if config.get("initial_max_turn", 3) != 3:
+        template = template + f" --initial_max_turn {config.get('initial_max_turn', 3)}"
     if config.get("rollouts_per_stage", 1280) != 1280:
         template = template + f" --rollouts_per_stage {config.get('rollouts_per_stage', 1280)}"
-        
-    print(f"template: {template}", flush=True)
+    if config.get("selected_game", "gin_rummy") != "gin_rummy":
+        template = template + f" --selected_game {config.get('selected_game', 'gin_rummy')}"
     return template
 
 
@@ -270,9 +377,18 @@ def get_training_json(train_info: dict) -> dict:
     model_architecture = get_model_architecture(model_path)
     param_nums = get_model_num_params(model_name, model_path)
     config = get_grpo_config(param_nums)
-    if model_name == "mistralai/Mistral-7B-Instruct-v0.3":
+    if model_name in ["mistralai/Mistral-7B-Instruct-v0.3", "mistralai/Mistral-7B-Instruct-v0.2"]:
         config = GRPO_CONFIG["6_9_b"]
     print(f"config: {config}")
+
+    env_name = train_info.get("dataset_type", {}).get("environment_name", None)
+    env_overrides = {}
+    if env_name and env_name in ENVIRONMENT_CONFIG:
+        size_label = config.get("label", None)
+        if size_label and size_label in ENVIRONMENT_CONFIG[env_name]:
+            env_overrides = ENVIRONMENT_CONFIG[env_name][size_label]
+            print(f"Applying ENVIRONMENT_CONFIG overrides for {env_name}/{size_label}: {env_overrides}")
+
     run_config = {
         "epoch_num": 2,
         "batch_size": config["batch_size"],
@@ -295,9 +411,9 @@ def get_training_json(train_info: dict) -> dict:
         "use_4bit": config.get("use_4bit", False),
         "beta": config.get("beta", 0.01),
         "num_generations": config.get("num_generations", 4),
-        "initial_max_turn": config.get("initial_max_turn", 2),
-        "rollouts_per_stage": config.get("rollouts_per_stage", 1280),
-        "environment_name": train_info.get("dataset_type", {}).get("environment_name"),
+        "initial_max_turn": env_overrides.get("initial_max_turn", config.get("initial_max_turn", 3)),
+        "rollouts_per_stage": env_overrides.get("rollouts_per_stage", config.get("rollouts_per_stage", 1280)),
+        "selected_game": env_name if env_name else "gin_rummy",
     }
 
     if model_name == "OpenAssistant/oasst-sft-4-pythia-12b-epoch-3.5":

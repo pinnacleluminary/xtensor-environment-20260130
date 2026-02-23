@@ -226,3 +226,4 @@ tensorboard_logs/
 scripts/run_py
 scripts/models
 scripts/test_data
+openspiel
