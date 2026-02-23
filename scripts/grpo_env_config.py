@@ -44,7 +44,7 @@ GRPO_CONFIG = {
         "gpu_count": 2,
         "batch_size": 2,
         "gradient_accumulation_steps": 8,
-        "vllm_gpu_memory_utilization": 0.35,
+        "vllm_gpu_memory_utilization": 0.3,
         "use_lora": True,
         "beta": 0.01,
         "num_generations": 4,
