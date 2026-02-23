@@ -62,7 +62,7 @@ class TrainingArguments(GRPOConfig):
     use_liger: Optional[bool] = field(default=False)
     disable_fa: Optional[bool] = field(default=False)
     disable_action_mask: Optional[bool] = field(default=False)
-    initial_max_turn: Optional[int] = field(default=2)
+    initial_max_turn: Optional[int] = field(default=3)
     rollouts_per_stage: Optional[int] = field(default=1280)
 
 def print_trainable_parameters(model):
