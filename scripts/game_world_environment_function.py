@@ -125,6 +125,55 @@ def get_hand_cards(observation_text: str, player_id: int = 0) -> list[int]:
     return [int(card) for card in string_cards]
 
 
+def get_phase_aware_hints(observation: str, turn_number: int, current_max_turn: int) -> str:
+    """
+    Generate phase-aware hints for Gin Rummy based on game phase and turn number.
+    
+    Args:
+        observation: Current game observation
+        turn_number: Current turn number
+        current_max_turn: Maximum turns allowed in current curriculum stage
+        
+    Returns:
+        Formatted hint string with phase-specific strategy tips
+    """
+    hints = []
+    
+    # Calculate game phase based on turn number and max turn
+    phase_ratio = turn_number / max(current_max_turn, 1)
+    
+    # Early game (first 30% of turns)
+    if phase_ratio < 0.3:
+        hints.append("- Early game: Draw from deck to see more cards and explore options")
+        hints.append("- Start identifying potential runs and sets in your hand")
+        hints.append("- Keep low-value cards that might form melds later")
+    
+    # Mid game (30-70% of turns)
+    elif phase_ratio < 0.7:
+        hints.append("- Mid game: Track opponent's discards to infer their strategy")
+        hints.append("- Optimize your hand by discarding high deadwood cards")
+        hints.append("- Build toward complete melds (runs or sets)")
+        hints.append("- Consider taking from discard pile if it completes a meld")
+    
+    # Late game (last 30% of turns)
+    else:
+        hints.append("- Late game: Evaluate if you should knock (deadwood ≤ 10)")
+        hints.append("- Go for Gin (0 deadwood) if you're close for bonus points")
+        hints.append("- Be cautious of undercut - ensure you have less deadwood than opponent")
+        hints.append("- If opponent is close to knocking, consider defensive discards")
+    
+    # Extract deadwood if available for context-specific hints
+    deadwood_match = re.search(r'Deadwood:\s*(\d+)', observation)
+    if deadwood_match:
+        deadwood = int(deadwood_match.group(1))
+        if deadwood <= 10 and phase_ratio >= 0.5:
+            hints.append(f"- You have {deadwood} deadwood - consider knocking soon!")
+        elif deadwood <= 3:
+            hints.append(f"- You have only {deadwood} deadwood - try for Gin!")
+    
+    return "\n".join(hints)
+
+
 REASONING_TAG_PAIRS = [
     ("think", "think"),
     ("thinking", "thinking"),
@@ -541,9 +590,11 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
         # First make system prompt
         system_prompt = "You are playing Gin Rummy.\n\n# Game Rules\nGIN RUMMY RULES:\nSetup: Standard 52-card deck. Each player starts with 10 cards.\nGoal: Form sets (3-4 of same rank) and runs (3+ consecutive cards of same suit) to minimize deadwood points.\n\nEach turn:\n1. Draw a card (from deck or discard pile)\n2. Discard a card to the discard pile\n3. Try to form melds (sets/runs) to reduce deadwood\n4. Knock when deadwood ≤ 10 points, or Gin when deadwood = 0\n\nScoring:\n- Gin (0 deadwood): 25 points + opponent's deadwood\n- Knock: Difference in deadwood (if you have less)\n- Undercut: Opponent wins if they have equal or less deadwood\n\nCard Values: Ace=1, 2-10=face value, Face cards=10\n\n# Output Format\nYou must respond with ONLY the action ID (a single number).\nDo NOT include descriptions or explanations.\n\nExamples:\n- For action \"0 -> draw from deck\": respond \"0\"\n- For action \"5 -> discard 7♠\": respond \"5\"\n- For action \"89 -> knock\": respond \"89\""
 
-        # Add suggestion for playing strategy based on curriculum
+        # Add phase-aware hints based on curriculum
         if use_hints:
-            suggestion_prompt = "\n\n# Strategy Tips\n- Early game: Draw from deck to see more cards\n- Build runs and sets to reduce deadwood\n- Track opponent's discards to guess their hand\n- Knock when you have ≤10 deadwood points and think you're ahead\n- Go for Gin (0 deadwood) when close for bonus points"
+            # Get initial phase-aware hints (turn 0 = early game)
+            phase_hints = get_phase_aware_hints(formatted_observation, 0, current_max_turn)
+            suggestion_prompt = f"\n\n# Strategy Tips (Turn 0)\n{phase_hints}"
             system_prompt += suggestion_prompt
 
         messages = [{"role": "system", "content": system_prompt}]
@@ -618,20 +669,32 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
 
         # Step environment with model's action
         invalid_action = False
+        invalid_reason = None
         
-        invalid_action = False
         try:
             action_id_parsed = int(action_to_send.strip())
             hand_cards = get_hand_cards(formatted_observation)
-            if action_id_parsed not in hand_cards:
-                print(f"Invalid action: {action_id_parsed} not in hand cards: {hand_cards}")
+            if not hand_cards:
+                # Can't validate without hand cards
+                invalid_action = False
+            elif action_id_parsed not in hand_cards:
                 invalid_action = True
-        except Exception:
+                invalid_reason = f"Action {action_id_parsed} not in hand cards: {hand_cards}"
+                print(f"[INVALID] Turn {turn_number}: {invalid_reason}")
+        except ValueError:
             invalid_action = True
-            print(f"Invalid action: {action_to_send}")
+            invalid_reason = f"Could not parse action as integer: {action_to_send}"
+            print(f"[INVALID] Turn {turn_number}: {invalid_reason}")
+        except Exception as e:
+            invalid_action = True
+            invalid_reason = f"Exception validating action: {e}"
+            print(f"[INVALID] Turn {turn_number}: {invalid_reason}")
             
         if invalid_action:
-            print(f"Messages: {messages}")
+            # Enhanced logging for debugging
+            print(f"[INVALID] Action attempted: {action_to_send[:100]}")
+            if hand_cards:
+                print(f"[INVALID] Valid hand cards: {hand_cards}")
             reward = INVALID_PENALTY
         elif strategy_followed:
             # Calculate scale reward for response length, longer responses get lower reward
@@ -846,9 +909,11 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
         # First make system prompt
         system_prompt = "You are playing Gin Rummy.\n\n# Game Rules\nGIN RUMMY RULES:\nSetup: Standard 52-card deck. Each player starts with 10 cards.\nGoal: Form sets (3-4 of same rank) and runs (3+ consecutive cards of same suit) to minimize deadwood points.\n\nEach turn:\n1. Draw a card (from deck or discard pile)\n2. Discard a card to the discard pile\n3. Try to form melds (sets/runs) to reduce deadwood\n4. Knock when deadwood ≤ 10 points, or Gin when deadwood = 0\n\nScoring:\n- Gin (0 deadwood): 25 points + opponent's deadwood\n- Knock: Difference in deadwood (if you have less)\n- Undercut: Opponent wins if they have equal or less deadwood\n\nCard Values: Ace=1, 2-10=face value, Face cards=10\n\n# Output Format\nYou must respond with ONLY the action ID (a single number).\nDo NOT include descriptions or explanations.\n\nExamples:\n- For action \"0 -> draw from deck\": respond \"0\"\n- For action \"5 -> discard 7♠\": respond \"5\"\n- For action \"89 -> knock\": respond \"89\""
 
-        # Add suggestion for playing strategy based on curriculum
+        # Add phase-aware hints based on curriculum
         if use_hints:
-            suggestion_prompt = "\n\n# Strategy Tips\n- Early game: Draw from deck to see more cards\n- Build runs and sets to reduce deadwood\n- Track opponent's discards to guess their hand\n- Knock when you have ≤10 deadwood points and think you're ahead\n- Go for Gin (0 deadwood) when close for bonus points"
+            # Get initial phase-aware hints (turn 0 = early game)
+            phase_hints = get_phase_aware_hints(formatted_observation, 0, current_max_turn)
+            suggestion_prompt = f"\n\n# Strategy Tips (Turn 0)\n{phase_hints}"
             system_prompt += suggestion_prompt
 
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": formatted_observation}]
@@ -933,14 +998,48 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
                 step_reward = -0.01
                 done = False
                 invalid_count += 1
+                # Enhanced logging for invalid actions
+                print(f"[INVALID] Step exception at turn {turn_number}: {e}")
+                print(f"[INVALID] Attempted action: {action_to_send[:100]}")  # First 100 chars
 
-            # Check for invalid actions in observation
-            if "Nothing happens" in formatted_observation or "Invalid" in formatted_observation:
+            # Check for invalid actions in observation with enhanced detection
+            is_invalid = False
+            invalid_reason = None
+            
+            if "Nothing happens" in formatted_observation:
+                is_invalid = True
+                invalid_reason = "Nothing happens"
+            elif "Invalid" in formatted_observation or "invalid" in formatted_observation.lower():
+                is_invalid = True
+                invalid_reason = "Invalid action detected"
+            
+            if is_invalid:
                 invalid_count += 1
+                # Enhanced logging with action type detection
+                action_type = "unknown"
+                if "draw" in action_to_send.lower() or action_to_send.strip().isdigit() and int(action_to_send.strip()) == 0:
+                    action_type = "draw"
+                elif "discard" in action_to_send.lower() or action_to_send.strip().isdigit():
+                    action_type = "discard/action"
+                elif "knock" in action_to_send.lower():
+                    action_type = "knock"
+                
+                print(f"[INVALID] Turn {turn_number}: {invalid_reason} (type: {action_type}, action: {action_to_send[:50]})")
+                
+                # Log hand state for debugging
+                hand_cards = get_hand_cards(formatted_observation)
+                if hand_cards:
+                    print(f"[INVALID] Hand cards: {hand_cards}")
 
             if done:
                 train_reward = step_reward
             else:
+                # Update hints dynamically if using hints (add phase-aware hints to new observations)
+                if use_hints and turn_number > 0 and turn_number % 5 == 0:  # Update hints every 5 turns
+                    phase_hints = get_phase_aware_hints(formatted_observation, turn_number, current_max_turn)
+                    # Add hint update to observation
+                    formatted_observation += f"\n\n# Strategy Update (Turn {turn_number})\n{phase_hints}"
+                
                 messages.append({"role": "user", "content": formatted_observation})
 
             turn_number += 1
@@ -961,8 +1060,14 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
         # Use final game score as the primary reward
         shaped_reward = train_reward + immediate_rewards
         
-        # Apply invalid action penalty
-        shaped_reward = shaped_reward - 0.05 * float(invalid_count)
+        # Apply progressive invalid action penalty (escalating penalty for repeated mistakes)
+        if invalid_count > 0:
+            # Base penalty per invalid action
+            invalid_penalty_base = 0.05
+            # Escalating penalty: first invalid = 0.05, second = 0.075, third = 0.10, etc.
+            invalid_penalty = sum(invalid_penalty_base * (1 + i * 0.5) for i in range(invalid_count))
+            shaped_reward = shaped_reward - invalid_penalty
+            print(f"[PENALTY] Invalid actions: {invalid_count}, total penalty: {invalid_penalty:.3f}")
 
         # Log in one line
         print("============")
