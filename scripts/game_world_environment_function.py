@@ -266,11 +266,14 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
 
         # Store endpoint on the function to avoid re-parsing
         rollout_first_prompt_and_completion.base_url = base_url
+        rollout_first_prompt_and_completion.rank = rank
         
         # Create environment (POST /create) - ONLY ONCE
         try:
             print(f"Initializing environment on rank {rank} at {base_url}...")
-            payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
+            # Use unique seed: hash of rank and initial task_id to ensure uniqueness
+            init_seed = hash((rank, games_to_task_id_range[selected_game][0])) % (2**31)
+            payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": init_seed, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
             create_res = requests.post(f"{base_url}/reset", json=payload, timeout=300)
             create_res.raise_for_status()
             rollout_first_prompt_and_completion.initialized = True
@@ -281,6 +284,7 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
 
     # Retrieve static variables
     env_endpoint = rollout_first_prompt_and_completion.base_url
+    rank = getattr(rollout_first_prompt_and_completion, "rank", int(os.environ.get("LOCAL_RANK", "0")))
 
     # --- 2. Rollout Setup ---
     all_episode_prompt_ids: list[list[int]] = []
@@ -305,7 +309,12 @@ def rollout_first_prompt_and_completion(prompts: list[str], trainer, max_turns: 
         turn_number = 0
         
         # --- Reset Environment (POST /reset) ---
-        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
+        # Generate unique seed for each rollout: seed is as important as task_id for game uniqueness
+        # Using hash of (game_id, index, rank) ensures uniqueness across all rollouts
+        # Get rank from function attribute or environment
+        current_rank = getattr(rollout_first_prompt_and_completion, "rank", int(os.environ.get("LOCAL_RANK", "0")))
+        unique_seed = hash((game_id, i, current_rank)) % (2**31)
+        payload = {"task_id": game_id, "seed": unique_seed, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
         
         try:
             reset_res = requests.post(f"{env_endpoint}/reset", json=payload, timeout=TIMEOUT)
@@ -443,7 +452,9 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
             try:
                 print(f"[INIT] Initializing env on server {idx}: {base_url}")
                 # Initialize with a test reset to ensure server is ready
-                payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
+                # Use unique seed: hash of server index and initial task_id to ensure uniqueness
+                init_seed = hash((idx, games_to_task_id_range[selected_game][0])) % (2**31)
+                payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": init_seed, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
                 res = requests.post(f"{base_url}/reset", json=payload, timeout=300)
                 res.raise_for_status()
                 env_pool.append({"base_url": base_url})
@@ -463,9 +474,9 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
         # Initialize curriculum scheduler
         rollout_last_prompt_and_completion_parallelized_curriculum.curriculum = CurriculumScheduler(
             initial_max_turn=trainer.args.initial_max_turn,
-            final_max_turn=50,  # Gin Rummy: games can go up to 30-50 turns
+            final_max_turn=45,
             rollouts_per_stage=trainer.args.rollouts_per_stage,
-            initial_hint_prob=0.50,  # Lower for complex game
+            initial_hint_prob=0.45,
             final_hint_prob=0.0,
             warmup_rollouts=trainer.args.rollouts_per_stage,
         )
@@ -504,7 +515,10 @@ def rollout_last_prompt_and_completion_parallelized_curriculum(
         use_hints = random.random() < current_hint_prob
 
         # --- Reset Environment (POST /reset) ---
-        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
+        # Generate unique seed for each rollout: seed is as important as task_id for game uniqueness
+        # Using hash of (game_id, index, rank) ensures uniqueness across all rollouts
+        unique_seed = hash((game_id, index, rank)) % (2**31)
+        payload = {"task_id": game_id, "seed": unique_seed, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
 
         try:
             reset_res = requests.post(f"{env_endpoint}/reset", json=payload, timeout=TIMEOUT)
@@ -731,7 +745,9 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
             try:
                 print(f"[INIT] Initializing env on server {idx}: {base_url}")
                 # Initialize with a test reset to ensure server is ready
-                payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
+                # Use unique seed: hash of server index and initial task_id to ensure uniqueness
+                init_seed = hash((idx, games_to_task_id_range[selected_game][0])) % (2**31)
+                payload = {"task_id": games_to_task_id_range[selected_game][0], "seed": init_seed, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
                 res = requests.post(f"{base_url}/reset", json=payload, timeout=300)
                 res.raise_for_status()
                 env_pool.append({"base_url": base_url})
@@ -751,9 +767,9 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
         # Initialize curriculum scheduler
         rollout_full_prompt_and_completion_parallelized_curriculum.curriculum = CurriculumScheduler(
             initial_max_turn=trainer.args.initial_max_turn,
-            final_max_turn=50,
+            final_max_turn=45,
             rollouts_per_stage=trainer.args.rollouts_per_stage,
-            initial_hint_prob=0.50,
+            initial_hint_prob=0.45,
             final_hint_prob=0.0,
             warmup_rollouts=trainer.args.rollouts_per_stage,
         )
@@ -804,7 +820,10 @@ def rollout_full_prompt_and_completion_parallelized_curriculum(
         use_hints = random.random() < current_hint_prob
 
         # --- Reset Environment (POST /reset) ---
-        payload = {"task_id": game_id, "seed": 42, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
+        # Generate unique seed for each rollout: seed is as important as task_id for game uniqueness
+        # Using hash of (game_id, index, rank) ensures uniqueness across all rollouts
+        unique_seed = hash((game_id, index, rank)) % (2**31)
+        payload = {"task_id": game_id, "seed": unique_seed, "opponent": "mcts", "mcts_max_simulations": 25, "mcts_num_rollouts": 1}
 
         try:
             reset_res = requests.post(f"{env_endpoint}/reset", json=payload, timeout=TIMEOUT)
