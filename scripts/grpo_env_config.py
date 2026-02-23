@@ -21,10 +21,10 @@ GRPO_CONFIG = {
         "gradient_accumulation_steps": 6,
         "vllm_gpu_memory_utilization": 0.4,
         "use_lora": True,
-        "beta": 0.02,
+        "beta": 0.08,
         "num_generations": 4,
         "initial_max_turn": 3,
-        "rollouts_per_stage": 1280,
+        "rollouts_per_stage": 1536,
     },
     "1_2_b": {
         "lr": 8e-6,
@@ -33,10 +33,11 @@ GRPO_CONFIG = {
         "batch_size": 3,
         "gradient_accumulation_steps": 12,
         "vllm_gpu_memory_utilization": 0.4,
-        "beta": 0.04,
+        "use_lora": True,
+        "beta": 0.10,
         "num_generations": 4,
         "initial_max_turn": 3,
-        "rollouts_per_stage": 1280,
+        "rollouts_per_stage": 1536,
     },
     "2_4_b": {
         "lr": 8e-6,
@@ -44,12 +45,12 @@ GRPO_CONFIG = {
         "gpu_count": 2,
         "batch_size": 2,
         "gradient_accumulation_steps": 8,
-        "vllm_gpu_memory_utilization": 0.3,
+        "vllm_gpu_memory_utilization": 0.35,
         "use_lora": True,
-        "beta": 0.01,
+        "beta": 0.10,
         "num_generations": 4,
         "initial_max_turn": 3,
-        "rollouts_per_stage": 1280,
+        "rollouts_per_stage": 1536,
     },
     "4_5_b": {
         "lr": 6e-6,
@@ -59,10 +60,10 @@ GRPO_CONFIG = {
         "gradient_accumulation_steps": 8,
         "use_lora": True,
         "vllm_gpu_memory_utilization": 0.35,
-        "beta": 0.01,
+        "beta": 0.10,
         "num_generations": 4,
         "initial_max_turn": 3,
-        "rollouts_per_stage": 1280,
+        "rollouts_per_stage": 1536,
     },
     "5_6_b": {
         "lr": 6e-6,
@@ -72,10 +73,10 @@ GRPO_CONFIG = {
         "gradient_accumulation_steps": 8,
         "use_lora": True,
         "vllm_gpu_memory_utilization": 0.35,
-        "beta": 0.01,
+        "beta": 0.10,
         "num_generations": 4,
         "initial_max_turn": 3,
-        "rollouts_per_stage": 1280,
+        "rollouts_per_stage": 1536,
     },
     "6_9_b": {
         "lr": 6e-6,
@@ -85,10 +86,10 @@ GRPO_CONFIG = {
         "gradient_accumulation_steps": 4,
         "use_lora": True,
         "vllm_gpu_memory_utilization": 0.35,
-        "beta": 0.01,
+        "beta": 0.10,
         "num_generations": 4,
         "initial_max_turn": 3,
-        "rollouts_per_stage": 1024,
+        "rollouts_per_stage": 1280,
     },
     "9_12_b": {
         "lr": 6e-6,
@@ -96,12 +97,12 @@ GRPO_CONFIG = {
         "gpu_count": 4,
         "use_lora": True,
         "batch_size": 16,
-        "gradient_accumulation_steps": 4,  # Added for consistency
+        "gradient_accumulation_steps": 4,
         "vllm_gpu_memory_utilization": 0.6,
-        "beta": 0.01,
-        "num_generations": 4,  # Added for Gin Rummy consistency
-        "initial_max_turn": 3,  # Added for Gin Rummy curriculum
-        "rollouts_per_stage": 1280,  # Added for Gin Rummy curriculum
+        "beta": 0.12,
+        "num_generations": 4,
+        "initial_max_turn": 3,
+        "rollouts_per_stage": 1280,
     },
     "12_15_b": {
         "lr": 5e-6,
@@ -109,12 +110,12 @@ GRPO_CONFIG = {
         "gpu_count": 4,
         "use_lora": True,
         "batch_size": 2,
-        "gradient_accumulation_steps": 4,  # Added for consistency
-        "vllm_gpu_memory_utilization": 0.65,  # Reduced from 0.8 to prevent OOM with longer Gin Rummy episodes (30-50 turns)
-        "beta": 0.01,
-        "num_generations": 4,  # Added for Gin Rummy consistency
-        "initial_max_turn": 3,  # Added for Gin Rummy curriculum
-        "rollouts_per_stage": 1280,  # Added for Gin Rummy curriculum
+        "gradient_accumulation_steps": 8,
+        "vllm_gpu_memory_utilization": 0.65,
+        "beta": 0.12,
+        "num_generations": 4,
+        "initial_max_turn": 3,
+        "rollouts_per_stage": 1280,
     },
     "15_20_b": {
         "lr": 5e-6,
@@ -122,13 +123,13 @@ GRPO_CONFIG = {
         "gpu_count": 4,
         "use_lora": True,
         "batch_size": 16,
-        "gradient_accumulation_steps": 4,  # Added for consistency
+        "gradient_accumulation_steps": 4,
         "vllm_gpu_memory_utilization": 0.6,
         "use_vllm": False,
-        "beta": 0.01,
-        "num_generations": 4,  # Added for Gin Rummy consistency
-        "initial_max_turn": 3,  # Added for Gin Rummy curriculum
-        "rollouts_per_stage": 1280,  # Added for Gin Rummy curriculum
+        "beta": 0.12,
+        "num_generations": 4,
+        "initial_max_turn": 3,
+        "rollouts_per_stage": 1280,
     },
     "20_40_b": {
         "lr": 4e-6,
@@ -136,14 +137,14 @@ GRPO_CONFIG = {
         "gpu_count": 8,
         "use_lora": True,
         "batch_size": 16,
-        "gradient_accumulation_steps": 4,  # Added for consistency
+        "gradient_accumulation_steps": 4,
         "vllm_gpu_memory_utilization": 0.6,
         "use_vllm": False,
         "use_4bit": True,
-        "beta": 0.01,
-        "num_generations": 4,  # Added for Gin Rummy consistency
-        "initial_max_turn": 3,  # Added for Gin Rummy curriculum
-        "rollouts_per_stage": 1280,  # Added for Gin Rummy curriculum
+        "beta": 0.15,
+        "num_generations": 4,
+        "initial_max_turn": 3,
+        "rollouts_per_stage": 1280,
     },
     "40_80_b": {
         "lr": 3e-6,
@@ -151,14 +152,14 @@ GRPO_CONFIG = {
         "gpu_count": 8,
         "use_lora": True,
         "batch_size": 2,
-        "gradient_accumulation_steps": 4,  # Added for consistency
+        "gradient_accumulation_steps": 8,
         "vllm_gpu_memory_utilization": 0.7,
         "use_vllm": False,
         "use_4bit": True,
-        "beta": 0.01,
-        "num_generations": 4,  # Added for Gin Rummy consistency
-        "initial_max_turn": 3,  # Added for Gin Rummy curriculum
-        "rollouts_per_stage": 1280,  # Added for Gin Rummy curriculum
+        "beta": 0.15,
+        "num_generations": 4,
+        "initial_max_turn": 3,
+        "rollouts_per_stage": 1024,
     },
 }
 
@@ -286,8 +287,8 @@ def get_run_cmd(config: dict, gpu_nums: int):
 
     if config.get("initial_max_turn", 3) != 3:
         template = template + f" --initial_max_turn {config.get('initial_max_turn', 3)}"
-    if config.get("rollouts_per_stage", 1280) != 1280:
-        template = template + f" --rollouts_per_stage {config.get('rollouts_per_stage', 1280)}"
+    if config.get("rollouts_per_stage", 1536) != 1536:
+        template = template + f" --rollouts_per_stage {config.get('rollouts_per_stage', 1536)}"
     return template
 
 
@@ -324,7 +325,7 @@ def get_training_json(train_info: dict) -> dict:
         "beta": config.get("beta", 0.01),
         "num_generations": config.get("num_generations", 4),
         "initial_max_turn": config.get("initial_max_turn", 3),
-        "rollouts_per_stage": config.get("rollouts_per_stage", 1280),
+        "rollouts_per_stage": config.get("rollouts_per_stage", 1536),
     }
 
     if model_name == "OpenAssistant/oasst-sft-4-pythia-12b-epoch-3.5":
